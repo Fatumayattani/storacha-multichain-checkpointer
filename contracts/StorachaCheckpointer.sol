@@ -3,22 +3,7 @@ pragma solidity ^0.8.20;
 
 import "./IAvailabilityVerifier.sol";
 import "./WormholeReceiver.sol";
-
-/// @notice Minimal Ownable
-contract Ownable {
-    address public owner;
-    modifier onlyOwner() {
-        require(msg.sender == owner, "not owner");
-        _;
-    }
-    constructor() {
-        owner = msg.sender;
-    }
-    function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "zero addr");
-        owner = newOwner;
-    }
-}
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
 /// @notice Minimal ReentrancyGuard
 contract ReentrancyGuard {
@@ -41,7 +26,9 @@ interface IWormhole {
 
 /// @title Storacha Checkpointer
 /// @notice Allows pinning data availability proofs onchain and bridging via Wormhole
-contract StorachaCheckpointer is Ownable, ReentrancyGuard {
+contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
+    bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
+
     struct Checkpoint {
         address user;
         bytes32 cid;
@@ -63,23 +50,24 @@ contract StorachaCheckpointer is Ownable, ReentrancyGuard {
     event CheckpointExtended(uint256 indexed id, uint256 newExpiry);
     event FeesWithdrawn(address to, uint256 amount);
 
-    constructor() {
-        feeRecipient = msg.sender;
+    constructor(address admin) {
+        _grantRole(ADMIN_ROLE, admin);
+        feeRecipient = admin;
     }
 
-    function setVerifier(address v) external onlyOwner {
+    function setVerifier(address v) external onlyRole(ADMIN_ROLE) {
         verifier = IAvailabilityVerifier(v);
     }
 
-    function setWormhole(address w) external onlyOwner {
+    function setWormhole(address w) external onlyRole(ADMIN_ROLE) {
         wormhole = IWormhole(w);
     }
 
-    function setFeeRecipient(address r) external onlyOwner {
+    function setFeeRecipient(address r) external onlyRole(ADMIN_ROLE) {
         feeRecipient = r;
     }
 
-    function setPricePerSecondWei(uint256 p) external onlyOwner {
+    function setPricePerSecondWei(uint256 p) external onlyRole(ADMIN_ROLE) {
         pricePerSecondWei = p;
     }
 
@@ -134,10 +122,10 @@ contract StorachaCheckpointer is Ownable, ReentrancyGuard {
         emit CheckpointExtended(id, cp.expiresAt);
     }
 
-    /// @notice Withdraw collected fees to a recipient. If `to` is zero, uses feeRecipient or owner.
-    function withdraw(address payable to, uint256 amount) external onlyOwner {
+    /// @notice Withdraw collected fees to a recipient. If `to` is zero, uses feeRecipient.
+    function withdraw(address payable to, uint256 amount) external onlyRole(ADMIN_ROLE) {
         if (to == address(0)) {
-            to = feeRecipient != address(0) ? payable(feeRecipient) : payable(owner);
+            to = feeRecipient != address(0) ? payable(feeRecipient) : payable(getRoleMember(ADMIN_ROLE, 0));
         }
         (bool ok, ) = to.call{value: amount}("");
         require(ok, "withdraw failed");
