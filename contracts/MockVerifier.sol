@@ -9,6 +9,9 @@ contract MockVerifier is IAvailabilityVerifier {
     mapping(bytes32 => bool) public available;
     address public owner;
 
+    event VerificationSubmitted(bytes32 indexed cid, address indexed submitter, uint256 timestamp);
+    event VerificationRevoked(bytes32 indexed cid, address indexed revoker, uint256 timestamp);
+
     constructor() {
         owner = msg.sender;
     }
@@ -20,6 +23,12 @@ contract MockVerifier is IAvailabilityVerifier {
 
     function setMockAvailable(bytes32 cid, bool availableStatus) external onlyOwner {
         available[cid] = availableStatus;
+        
+        if (availableStatus) {
+            emit VerificationSubmitted(cid, msg.sender, block.timestamp);
+        } else {
+            emit VerificationRevoked(cid, msg.sender, block.timestamp);
+        }
     }
 
     function isAvailable(bytes32 cid, bytes calldata) external view override returns (bool) {
