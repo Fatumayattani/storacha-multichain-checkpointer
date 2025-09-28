@@ -68,4 +68,58 @@ contract MockVerifier is IAvailabilityVerifier {
     function getVerificationTimestamp(bytes32 cid) external view returns (uint256 timestamp) {
         return verifications[cid].timestamp;
     }
+
+    /// @notice Set availability for multiple CIDs in a single transaction
+    /// @param cids Array of CIDs to set
+    /// @param statuses Array of availability statuses (must match cids length)
+    function batchSetMockAvailable(bytes32[] calldata cids, bool[] calldata statuses) external onlyOwner {
+        require(cids.length == statuses.length, "arrays length mismatch");
+        require(cids.length > 0, "empty arrays");
+        
+        for (uint256 i = 0; i < cids.length; i++) {
+            bytes32 cid = cids[i];
+            bool availableStatus = statuses[i];
+            
+            available[cid] = availableStatus;
+            
+            // Store detailed verification information
+            verifications[cid] = VerificationInfo({
+                isVerified: availableStatus,
+                timestamp: block.timestamp,
+                verifier: msg.sender
+            });
+            
+            if (availableStatus) {
+                emit VerificationSubmitted(cid, msg.sender, block.timestamp);
+            } else {
+                emit VerificationRevoked(cid, msg.sender, block.timestamp);
+            }
+        }
+    }
+
+    /// @notice Set all CIDs to the same availability status
+    /// @param cids Array of CIDs to set
+    /// @param status The availability status to set for all CIDs
+    function batchSetAllAvailable(bytes32[] calldata cids, bool status) external onlyOwner {
+        require(cids.length > 0, "empty array");
+        
+        for (uint256 i = 0; i < cids.length; i++) {
+            bytes32 cid = cids[i];
+            
+            available[cid] = status;
+            
+            // Store detailed verification information
+            verifications[cid] = VerificationInfo({
+                isVerified: status,
+                timestamp: block.timestamp,
+                verifier: msg.sender
+            });
+            
+            if (status) {
+                emit VerificationSubmitted(cid, msg.sender, block.timestamp);
+            } else {
+                emit VerificationRevoked(cid, msg.sender, block.timestamp);
+            }
+        }
+    }
 }
