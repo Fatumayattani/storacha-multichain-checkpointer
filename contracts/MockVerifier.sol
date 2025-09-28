@@ -18,8 +18,8 @@ contract MockVerifier is IAvailabilityVerifier {
         _;
     }
 
-    function setMockAvailable(bytes32 cid, bool isAvailable) external onlyOwner {
-        available[cid] = isAvailable;
+    function setMockAvailable(bytes32 cid, bool availableStatus) external onlyOwner {
+        available[cid] = availableStatus;
     }
 
     function isAvailable(bytes32 cid, bytes calldata) external view override returns (bool) {

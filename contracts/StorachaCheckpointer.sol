@@ -125,7 +125,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
     /// @notice Withdraw collected fees to a recipient. If `to` is zero, uses feeRecipient.
     function withdraw(address payable to, uint256 amount) external onlyRole(ADMIN_ROLE) {
         if (to == address(0)) {
-            to = feeRecipient != address(0) ? payable(feeRecipient) : payable(getRoleMember(ADMIN_ROLE, 0));
+            to = feeRecipient != address(0) ? payable(feeRecipient) : payable(msg.sender);
         }
         (bool ok, ) = to.call{value: amount}("");
         require(ok, "withdraw failed");
