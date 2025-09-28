@@ -67,6 +67,21 @@ contract MockVerifier is IAvailabilityVerifier {
         emit VerificationRevoked(cid, msg.sender, block.timestamp);
     }
 
+    /// @notice Allow any user to submit verification for a CID
+    /// @param cid The CID to verify
+    function submitVerification(bytes32 cid) external {
+        available[cid] = true;
+        
+        // Store detailed verification information
+        verifications[cid] = VerificationInfo({
+            isVerified: true,
+            timestamp: block.timestamp,
+            verifier: msg.sender
+        });
+        
+        emit VerificationSubmitted(cid, msg.sender, block.timestamp);
+    }
+
     /// @notice Get detailed verification information for a CID
     /// @param cid The CID to check
     /// @return isVerified Whether the CID is verified
