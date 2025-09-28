@@ -9,6 +9,16 @@ contract MockVerifier is IAvailabilityVerifier {
     mapping(bytes32 => bool) public available;
     address public owner;
 
+    /// @notice Structure to store detailed verification information
+    struct VerificationInfo {
+        bool isVerified;
+        uint256 timestamp;
+        address verifier;
+    }
+
+    /// @notice Mapping from CID to detailed verification information
+    mapping(bytes32 => VerificationInfo) public verifications;
+
     event VerificationSubmitted(bytes32 indexed cid, address indexed submitter, uint256 timestamp);
     event VerificationRevoked(bytes32 indexed cid, address indexed revoker, uint256 timestamp);
 
@@ -24,6 +34,13 @@ contract MockVerifier is IAvailabilityVerifier {
     function setMockAvailable(bytes32 cid, bool availableStatus) external onlyOwner {
         available[cid] = availableStatus;
         
+        // Store detailed verification information
+        verifications[cid] = VerificationInfo({
+            isVerified: availableStatus,
+            timestamp: block.timestamp,
+            verifier: msg.sender
+        });
+        
         if (availableStatus) {
             emit VerificationSubmitted(cid, msg.sender, block.timestamp);
         } else {
@@ -33,5 +50,22 @@ contract MockVerifier is IAvailabilityVerifier {
 
     function isAvailable(bytes32 cid, bytes calldata) external view override returns (bool) {
         return available[cid];
+    }
+
+    /// @notice Get detailed verification information for a CID
+    /// @param cid The CID to check
+    /// @return isVerified Whether the CID is verified
+    /// @return timestamp When the verification was set
+    /// @return verifier Who set the verification
+    function getVerificationInfo(bytes32 cid) external view returns (bool isVerified, uint256 timestamp, address verifier) {
+        VerificationInfo memory info = verifications[cid];
+        return (info.isVerified, info.timestamp, info.verifier);
+    }
+
+    /// @notice Get the timestamp when a CID was verified
+    /// @param cid The CID to check
+    /// @return timestamp When the verification was set (0 if not verified)
+    function getVerificationTimestamp(bytes32 cid) external view returns (uint256 timestamp) {
+        return verifications[cid].timestamp;
     }
 }
