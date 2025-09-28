@@ -52,6 +52,21 @@ contract MockVerifier is IAvailabilityVerifier {
         return available[cid];
     }
 
+    /// @notice Revoke verification for a CID (testing utility)
+    /// @param cid The CID to revoke verification for
+    function revokeVerification(bytes32 cid) external onlyOwner {
+        available[cid] = false;
+        
+        // Store detailed verification information
+        verifications[cid] = VerificationInfo({
+            isVerified: false,
+            timestamp: block.timestamp,
+            verifier: msg.sender
+        });
+        
+        emit VerificationRevoked(cid, msg.sender, block.timestamp);
+    }
+
     /// @notice Get detailed verification information for a CID
     /// @param cid The CID to check
     /// @return isVerified Whether the CID is verified
