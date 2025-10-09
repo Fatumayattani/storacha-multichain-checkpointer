@@ -184,7 +184,6 @@ npx hardhat run scripts/deploy.ts --network baseSepolia
 
 We welcome contributors!
 Open an issue or PR to suggest improvements.
-For dev coordination, join the Storacha Hackathon workspace and check the open GitHub Discussions.
 
 ---
 
