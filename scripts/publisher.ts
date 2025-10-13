@@ -1,0 +1,95 @@
+import { ethers } from "ethers";
+import dotenv from "dotenv";
+import {
+  getWormholeCoreAddress,
+  WORMHOLE_CONFIG,
+} from "../config/wormhole.config";
+
+import { CHAIN_IDS } from "../constants/chainIds.js";
+import {
+  getEmitterAddressEth,
+  parseSequenceFromLogEth,
+  publishMessage,
+} from "@certusone/wormhole-sdk";
+
+dotenv.config();
+
+const RPC_URL = process.env.RPC_URL!;
+const PRIVATE_KEY = process.env.PRIVATE_KEY!;
+const SOURCE_CHAIN_ID = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE; // You can switch this
+const WORMHOLE_CORE = getWormholeCoreAddress(SOURCE_CHAIN_ID);
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+
+/**
+ * Encodes a checkpoint message to match CheckpointCodec.sol
+ */
+function encodeCheckpoint(
+  cid: string,
+  tag: string,
+  expiresAt: number,
+  creator: string,
+  timestamp: number,
+  sourceChainId: number
+): string {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return abiCoder.encode(
+    ["uint8", "string", "bytes32", "uint256", "address", "uint256", "uint16"],
+    [1, cid, tag, expiresAt, creator, timestamp, sourceChainId]
+  );
+}
+
+/**
+ * Publishes a Wormhole message containing checkpoint data
+ */
+export async function publishCheckpoint(
+  cid: string,
+  tag: string,
+  expiresAt: number
+) {
+  const creator = await signer.getAddress();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const payload = encodeCheckpoint(
+    cid,
+    tag,
+    expiresAt,
+    creator,
+    timestamp,
+    SOURCE_CHAIN_ID
+  );
+
+  console.log("Publishing checkpoint to Wormhole...");
+  console.log("Source chain:", SOURCE_CHAIN_ID);
+  console.log("Core address:", WORMHOLE_CORE);
+  console.log("Payload (encoded):", payload);
+
+  const tx = await publishMessage(
+    signer,
+    WORMHOLE_CORE,
+    0, // nonce
+    payload,
+    WORMHOLE_CONFIG.consistencyLevel
+  );
+
+  const receipt = await tx.wait();
+  const sequence = parseSequenceFromLogEth(receipt);
+  const emitter = await getEmitterAddressEth(WORMHOLE_CORE);
+
+  console.log("✅ Checkpoint published");
+  console.log("Emitter:", emitter);
+  console.log("Sequence:", sequence);
+
+  return { emitter, sequence };
+}
+
+// Run with: npx ts-node scripts/publisher.ts
+if (require.main === module) {
+  (async () => {
+    const cid = "bafyExampleCid123";
+    const tag = ethers.encodeBytes32String("file1");
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+    await publishCheckpoint(cid, tag, expiresAt);
+  })();
+}
