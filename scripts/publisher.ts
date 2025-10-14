@@ -4,12 +4,10 @@ import {
   getWormholeCoreAddress,
   WORMHOLE_CONFIG,
 } from "../config/wormhole.config";
-
-import { CHAIN_IDS } from "../constants/chainIds.js";
+import { CHAIN_IDS } from "../constants/chainIds";
 import {
   getEmitterAddressEth,
   parseSequenceFromLogEth,
-  publishMessage,
 } from "@certusone/wormhole-sdk";
 
 dotenv.config();
@@ -21,6 +19,11 @@ const WORMHOLE_CORE = getWormholeCoreAddress(SOURCE_CHAIN_ID);
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+
+// ABI for Wormhole Core
+const coreAbi = [
+  "function publishMessage(uint32 nonce, bytes payload, uint8 consistencyLevel) payable returns (uint64)",
+];
 
 /**
  * Encodes a checkpoint message to match CheckpointCodec.sol
@@ -64,16 +67,17 @@ export async function publishCheckpoint(
   console.log("Core address:", WORMHOLE_CORE);
   console.log("Payload (encoded):", payload);
 
-  const tx = await publishMessage(
-    signer,
-    WORMHOLE_CORE,
+  const coreContract = new ethers.Contract(WORMHOLE_CORE, coreAbi, signer);
+
+  const tx = await coreContract.publishMessage(
     0, // nonce
     payload,
-    WORMHOLE_CONFIG.consistencyLevel
+    WORMHOLE_CONFIG.consistencyLevel,
+    { value: 0 }
   );
 
   const receipt = await tx.wait();
-  const sequence = parseSequenceFromLogEth(receipt);
+  const sequence = parseSequenceFromLogEth(receipt, WORMHOLE_CORE);
   const emitter = await getEmitterAddressEth(WORMHOLE_CORE);
 
   console.log("✅ Checkpoint published");
@@ -84,7 +88,7 @@ export async function publishCheckpoint(
 }
 
 // Run with: npx ts-node scripts/publisher.ts
-if (require.main === module) {
+if (process.argv[1] === new URL(import.meta.url).pathname) {
   (async () => {
     const cid = "bafyExampleCid123";
     const tag = ethers.encodeBytes32String("file1");
