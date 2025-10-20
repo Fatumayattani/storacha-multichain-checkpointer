@@ -5,7 +5,6 @@ import "./IAvailabilityVerifier.sol";
 import "./WormholeReceiver.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-/// @notice Minimal ReentrancyGuard
 contract ReentrancyGuard {
     uint256 private locked = 1;
     modifier nonReentrant() {
@@ -16,7 +15,6 @@ contract ReentrancyGuard {
     }
 }
 
-/// @notice Wormhole-like interface
 interface IWormhole {
     function publishMessage(
         uint32 nonce,
@@ -25,32 +23,27 @@ interface IWormhole {
     ) external payable returns (uint64 sequence);
 }
 
-/// @title Storacha Checkpointer
-/// @notice Allows pinning data availability proofs onchain and broadcasting via Wormhole
 contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
     bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
 
     struct Checkpoint {
         address user;
-        string cid;            // human-readable CID string
+        string cid;
         bytes32 tag;
         uint256 expiresAt;
-        uint256 timestamp;     // created at
+        uint256 timestamp;
         bool verified;
     }
 
     uint256 public nextCheckpointId = 1;
     mapping(uint256 => Checkpoint) public checkpoints;
-
-    // index by hash of CID for efficient lookups
     mapping(bytes32 => uint256[]) public byCid;
 
     IAvailabilityVerifier public verifier;
     IWormhole public wormhole;
-    uint256 public pricePerSecondWei = 1e15; // 0.001 ETH per second
+    uint256 public pricePerSecondWei = 1e15;
     address public feeRecipient;
 
-    /// @dev emits both cidHash (indexed) for filtering and cid (string) for readability
     event CheckpointCreated(
         uint256 indexed id,
         address indexed user,
@@ -85,12 +78,13 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         pricePerSecondWei = p;
     }
 
-    /// @notice Create a checkpoint and optionally publish a Wormhole message
-    /// @param cid Human-readable IPFS CID string
-    /// @param duration Seconds to keep the checkpoint alive
-    /// @param verifierData Opaque data for the availability verifier
-    /// @param tag User-defined label
-    /// @param publishToWormhole If true, publish Wormhole payload
+    function _wormholeChainId() internal view returns (uint16) {
+        if (block.chainid == 84532) return 10004; // Base Sepolia
+        if (block.chainid == 43113) return 6;     // Avalanche Fuji
+        if (block.chainid == 11155111) return 10002; // Ethereum Sepolia
+        revert("Unsupported chain");
+    }
+
     function createCheckpoint(
         string calldata cid,
         uint256 duration,
@@ -104,7 +98,6 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         uint256 cost = pricePerSecondWei * duration;
         require(msg.value >= cost, "underpay");
 
-        // use hash of CID string to interface with existing verifier
         bytes32 cidHash = keccak256(bytes(cid));
         bool ok = verifier.isAvailable(cidHash, verifierData);
         require(ok, "not available");
@@ -127,27 +120,16 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
             payable(msg.sender).transfer(msg.value - cost);
         }
 
-        // MVP Wormhole payload
-        // struct StorachaCheckpointMessage {
-        //   uint8 version;
-        //   string cid;
-        //   bytes32 tag;
-        //   uint256 expiresAt;
-        //   address creator;
-        //   uint256 timestamp;
-        //   uint16 sourceChainId;
-        // }
         if (publishToWormhole) {
             bytes memory payload = abi.encode(
-                uint8(1),                // version
-                cid,                     // string CID
-                tag,                     // tag
-                expiresAt,               // expiry
-                msg.sender,              // creator
-                block.timestamp,         // timestamp
-                uint16(block.chainid)    // source chain id (Wormhole style)
+                uint8(1),
+                cid,
+                tag,
+                expiresAt,
+                msg.sender,
+                block.timestamp,
+                _wormholeChainId() // ✅ fixed chain ID
             );
-            // consistencyLevel 1 for testnet by default
             wormhole.publishMessage(0, payload, 1);
         }
 
@@ -183,7 +165,6 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         emit CheckpointExtended(id, cp.expiresAt);
     }
 
-    /// @notice Withdraw collected fees to a recipient. If `to` is zero, uses feeRecipient.
     function withdraw(address payable to, uint256 amount) external onlyRole(ADMIN_ROLE) {
         if (to == address(0)) {
             to = feeRecipient != address(0) ? payable(feeRecipient) : payable(msg.sender);
@@ -193,14 +174,11 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         emit FeesWithdrawn(to, amount);
     }
 
-    /// @notice Convenience view to fetch checkpoint by creator and tag
     function getCheckpointByCreatorTag(address creator, bytes32 tag)
         external
         view
         returns (Checkpoint memory, uint256 id)
     {
-        // linear scan of byCid would be inefficient, so expose simple read helpers if needed
-        // callers can still track their ids from events in most flows
         for (uint256 i = 1; i < nextCheckpointId; i++) {
             if (checkpoints[i].user == creator && checkpoints[i].tag == tag) {
                 return (checkpoints[i], i);

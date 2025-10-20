@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 import {
   getWormholeCoreAddress,
   WORMHOLE_CONFIG,
-} from "../config/wormhole.config";
-import { CHAIN_IDS } from "../constants/chainIds";
+} from "../config/wormhole.config.ts";
+import { CHAIN_IDS } from "../constants/chainIds.ts";
 import {
   getEmitterAddressEth,
   parseSequenceFromLogEth,
@@ -14,10 +14,12 @@ dotenv.config();
 
 const RPC_URL = process.env.RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
-const SOURCE_CHAIN_ID = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE; // You can switch this
+
+// ✅ Use Wormhole chain ID constant (not EVM ID)
+const SOURCE_CHAIN_ID = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE;
 const WORMHOLE_CORE = getWormholeCoreAddress(SOURCE_CHAIN_ID);
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 
 // ABI for Wormhole Core
@@ -26,7 +28,7 @@ const coreAbi = [
 ];
 
 /**
- * Encodes a checkpoint message to match CheckpointCodec.sol
+ * Encodes a checkpoint message to match CheckpointCodec
  */
 function encodeCheckpoint(
   cid: string,
@@ -36,7 +38,7 @@ function encodeCheckpoint(
   timestamp: number,
   sourceChainId: number
 ): string {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const abiCoder = ethers.utils.defaultAbiCoder;
   return abiCoder.encode(
     ["uint8", "string", "bytes32", "uint256", "address", "uint256", "uint16"],
     [1, cid, tag, expiresAt, creator, timestamp, sourceChainId]
@@ -91,7 +93,7 @@ export async function publishCheckpoint(
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   (async () => {
     const cid = "bafyExampleCid123";
-    const tag = ethers.encodeBytes32String("file1");
+    const tag = ethers.utils.formatBytes32String("file1");
     const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 
     await publishCheckpoint(cid, tag, expiresAt);

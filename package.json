@@ -27,7 +27,6 @@
     "@typescript-eslint/parser": "^6.0.0",
     "chai": "^5.3.3",
     "eslint": "^8.0.0",
-    "ethers": "^6.15.0",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
     "husky": "^8.0.3",
     "lint-staged": "^15.0.0",
@@ -52,6 +51,10 @@
   "dependencies": {
     "@certusone/wormhole-sdk": "^0.10.18",
     "@openzeppelin/contracts": "^5.4.0",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "ethers": "5.8.0"
+  },
+  "overrides": {
+    "ethers": "5.8.0"
   }
 }
