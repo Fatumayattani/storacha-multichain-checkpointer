@@ -555,6 +555,60 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     // ============ QUERY FUNCTIONS ============
     
     /**
+     * BREAKING CHANGES from v1.0:
+     * ==============================
+     * 
+     * 1. getCheckpointByCid() now REQUIRES sourceChainId parameter
+     *    OLD: getCheckpointByCid(cid)
+     *    NEW: getCheckpointByCid(cid, sourceChainId)
+     * 
+     * 2. getVaaHashByCid() now REQUIRES sourceChainId parameter
+     *    OLD: getVaaHashByCid(cid)
+     *    NEW: getVaaHashByCid(cid, sourceChainId)
+     * 
+     * 3. Same CID can now exist on multiple chains
+     *    - One CID per chain (enforced via CID+chain composite key)
+     *    - Queries must specify which chain's checkpoint to retrieve
+     *    - Error messages include chain ID for clarity
+     * 
+     * MIGRATION GUIDE:
+     * ================
+     * 
+     * Frontend/Backend Code:
+     * ```typescript
+     * // BEFORE (v1.0)
+     * const checkpoint = await receiver.getCheckpointByCid(cid);
+     * 
+     * // AFTER (v1.1+)
+     * const chainId = 10004; // Base Sepolia Wormhole chain ID
+     * const checkpoint = await receiver.getCheckpointByCid(cid, chainId);
+     * ```
+     * 
+     * Smart Contract Integrations:
+     * ```solidity
+     * // BEFORE (v1.0)
+     * StoredCheckpoint memory cp = receiver.getCheckpointByCid("bafybei...");
+     * 
+     * // AFTER (v1.1+)
+     * uint16 chainId = 10004; // Base Sepolia
+     * StoredCheckpoint memory cp = receiver.getCheckpointByCid("bafybei...", chainId);
+     * ```
+     * 
+     * RATIONALE:
+     * ==========
+     * This change enables cross-chain checkpoint deduplication while preventing
+     * conflicts. The same content (CID) can be checkpointed on multiple chains
+     * without collision, which is essential for true multi-chain operation.
+     * 
+     * COMPATIBILITY:
+     * ==============
+     * - Publisher (StorachaCheckpointer): ✅ No changes needed
+     * - Wormhole VAA format: ✅ No changes needed
+     * - Message encoding: ✅ No changes needed
+     * - Only query functions affected: getCheckpointByCid, getVaaHashByCid
+     */
+    
+    /**
      * @notice Get checkpoint by VAA hash
      * @param vaaHash The VAA hash (from Wormhole VM)
      * @return checkpoint The stored checkpoint with all metadata
