@@ -238,29 +238,65 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
         return trustedEmitters[chainId][emitter];
     }
     
-    // ============ CORE FUNCTIONS (TO BE IMPLEMENTED) ============
+    // ============ CORE FUNCTIONS ============
     
     /**
      * @notice Process a Wormhole VAA and store checkpoint
      * @param encodedVaa The encoded VAA bytes from Wormhole
-     * @dev Implementation in Sub-task 5.2
+     * @dev This is the main entry point for receiving cross-chain messages
+     * 
+     * SECURITY:
+     * - Verifies VAA signatures using Wormhole Core
+     * - Prevents replay attacks
+     * - Validates emitter against whitelist
+     * - Uses nonReentrant modifier
      * 
      * FLOW:
      * 1. Parse and verify VAA using wormholeCore.parseAndVerifyVM()
      * 2. Check replay protection (consumedVAAs)
      * 3. Validate emitter (trustedEmitters)
-     * 4. Decode payload using CheckpointCodec
-     * 5. Validate message (expiration, age, format)
-     * 6. Store checkpoint
-     * 7. Emit CheckpointReceived event
+     * 4. Extract payload and call receiveWormholeMessage()
+     * 5. Mark VAA as consumed
+     * 
+     * @custom:reverts InvalidVAA if VAA verification fails
+     * @custom:reverts VAAConsumed if VAA already processed
+     * @custom:reverts UntrustedEmitter if emitter not whitelisted
      */
     function receiveCheckpoint(bytes calldata encodedVaa) 
         external 
         override 
         nonReentrant 
     {
-        // Sub-task 5.2: VAA Processing & Message Reception
-        revert("Not implemented - Sub-task 5.2");
+        // Step 1: Parse and verify VAA
+        (IWormholeCore.VM memory vm, bool valid, ) = 
+            wormholeCore.parseAndVerifyVM(encodedVaa);
+        
+        if (!valid) {
+            revert InvalidVAA();
+        }
+        
+        // Step 2: Compute VAA hash for replay protection
+        bytes32 vaaHash = vm.hash;
+        
+        // Step 3: Check replay protection
+        if (consumedVAAs[vaaHash]) {
+            revert VAAConsumed(vaaHash);
+        }
+        
+        // Step 4: Validate emitter
+        if (!trustedEmitters[vm.emitterChainId][vm.emitterAddress]) {
+            revert UntrustedEmitter(vm.emitterChainId, vm.emitterAddress);
+        }
+        
+        // Step 5: Process message (will store checkpoint)
+        this.receiveWormholeMessage(
+            vm.payload,
+            vm.emitterChainId,
+            vm.emitterAddress
+        );
+        
+        // Step 6: Mark VAA as consumed (after successful processing)
+        consumedVAAs[vaaHash] = true;
     }
     
     /**
@@ -268,18 +304,106 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
      * @param payload The encoded checkpoint message (CheckpointCodec format)
      * @param sourceChain The Wormhole chain ID
      * @param sourceAddress The emitter address (bytes32)
-     * @dev Implementation in Sub-task 5.2
+     * @dev This function decodes, validates, and stores the checkpoint
      * 
-     * NOTE: This function is called internally by receiveCheckpoint()
-     * It's part of IWormholeReceiver interface but not meant for external calls
+     * NOTE: This function is part of IWormholeReceiver interface.
+     * It's called by receiveCheckpoint() after VAA verification.
+     * Marked 'external' for interface compliance but should only be called
+     * by this contract via 'this.receiveWormholeMessage()'.
+     * 
+     * FLOW:
+     * 1. Decode payload using CheckpointCodec
+     * 2. Validate message (CheckpointCodec.validateWithErrors)
+     * 3. Check CID uniqueness
+     * 4. Compute VAA hash
+     * 5. Store checkpoint
+     * 6. Update indices
+     * 7. Emit event
+     * 
+     * @custom:reverts InvalidMessage if decoding fails
+     * @custom:reverts CheckpointExpired if message expired
+     * @custom:reverts CheckpointTooOld if message too old
+     * @custom:reverts CIDAlreadyExists if CID already stored
      */
     function receiveWormholeMessage(
         bytes memory payload,
         uint16 sourceChain,
         bytes32 sourceAddress
     ) external override {
-        // Sub-task 5.2: Message Processing
-        revert("Not implemented - Sub-task 5.2");
+        // Security: Only allow calls from this contract
+        // (called via this.receiveWormholeMessage in receiveCheckpoint)
+        require(msg.sender == address(this), "Internal only");
+        
+        // Step 1: Decode message using CheckpointCodec
+        CheckpointCodec.StorachaCheckpointMessage memory message;
+        
+        try this._decodeMessage(payload) returns (
+            CheckpointCodec.StorachaCheckpointMessage memory decoded
+        ) {
+            message = decoded;
+        } catch {
+            revert InvalidMessage("Decode failed");
+        }
+        
+        // Step 2: Validate message
+        // CheckpointCodec.validateWithErrors will revert with specific errors if invalid
+        CheckpointCodec.validateWithErrors(message);
+        
+        // Step 3: Check CID uniqueness
+        bytes32 cidHash = getCidHash(message.cid);
+        if (cidHashToVaaHash[cidHash] != bytes32(0)) {
+            revert CIDAlreadyExists(cidHash);
+        }
+        
+        // Step 4: Compute VAA hash from message components
+        // We reconstruct this from the message hash since we don't have
+        // access to the original encodedVaa in this function
+        bytes32 vaaHash = CheckpointCodec.getMessageHash(message);
+        
+        // Step 5: Store checkpoint
+        checkpoints[vaaHash] = StoredCheckpoint({
+            cid: message.cid,
+            tag: message.tag,
+            expiresAt: message.expiresAt,
+            creator: message.creator,
+            timestamp: message.timestamp,
+            sourceChainId: sourceChain,
+            emitterAddress: sourceAddress,
+            receivedAt: block.timestamp
+        });
+        
+        // Step 6: Update indices
+        cidHashToVaaHash[cidHash] = vaaHash;
+        
+        // Step 7: Update counters
+        checkpointCountByChain[sourceChain]++;
+        totalCheckpoints++;
+        
+        // Step 8: Emit event
+        emit CheckpointReceived(
+            vaaHash,
+            cidHash,
+            message.tag,
+            sourceChain,
+            message.creator,
+            message.cid,
+            message.expiresAt,
+            block.timestamp
+        );
+    }
+    
+    /**
+     * @notice Helper function to decode message (for try-catch)
+     * @param payload The encoded message
+     * @return Decoded message
+     * @dev External function needed for try-catch pattern
+     */
+    function _decodeMessage(bytes memory payload) 
+        external 
+        pure 
+        returns (CheckpointCodec.StorachaCheckpointMessage memory) 
+    {
+        return CheckpointCodec.decode(payload);
     }
     
     // ============ ACCESS CONTROL FUNCTIONS (TO BE IMPLEMENTED) ============
