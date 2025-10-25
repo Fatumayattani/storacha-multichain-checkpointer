@@ -591,10 +591,10 @@ describe("WormholeReceiver Contract", function () {
         event2!.args.payload
       );
 
-      // Try to receive second (should fail - duplicate CID)
+      // Try to receive second (should fail - duplicate CID on same chain)
       await expect(
         receiver.receiveCheckpoint(mockVaa2)
-      ).to.be.revertedWithCustomError(receiver, "CIDAlreadyExists");
+      ).to.be.revertedWithCustomError(receiver, "CIDAlreadyExistsOnChain");
     });
   });
 

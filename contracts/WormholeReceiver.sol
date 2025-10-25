@@ -120,9 +120,10 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     /// @param emitter Emitter address
     error EmitterNotTrusted(uint16 chainId, bytes32 emitter);
     
-    /// @notice CID already exists (duplicate)
+    /// @notice CID already exists on a specific chain
     /// @param cidHash Hash of the CID
-    error CIDAlreadyExists(bytes32 cidHash);
+    /// @param chainId The Wormhole chain ID where CID already exists
+    error CIDAlreadyExistsOnChain(bytes32 cidHash, uint16 chainId);
     
     /// @notice Zero address provided
     error ZeroAddress();
@@ -363,7 +364,7 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
         bytes32 uniqueKey = keccak256(abi.encodePacked(cidHash, sourceChain));
         
         if (cidHashToVaaHash[uniqueKey] != bytes32(0)) {
-            revert CIDAlreadyExists(cidHash);
+            revert CIDAlreadyExistsOnChain(cidHash, sourceChain);
         }
         
         // Step 4: Store checkpoint using REAL Wormhole VAA hash
