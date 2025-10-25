@@ -58,9 +58,10 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     /// @dev VAA hash is keccak256(encodedVaa) - unique per VAA
     mapping(bytes32 => StoredCheckpoint) public checkpoints;
     
-    /// @notice CID hash to VAA hash lookup (for CID queries)
-    /// @dev Using keccak256(bytes(cid)) as key for gas efficiency
-    /// One CID = One checkpoint (uniqueness enforced)
+    /// @notice CID+Chain to VAA hash lookup (for CID queries)
+    /// @dev Key is keccak256(abi.encodePacked(cidHash, chainId))
+    /// Same CID can exist on different chains (one per chain)
+    /// Use getUniqueKey(cidHash, chainId) to compute key
     mapping(bytes32 => bytes32) public cidHashToVaaHash;
     
     /// @notice Replay protection: consumed VAA hashes
@@ -82,9 +83,6 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     
     /// @notice Invalid Wormhole Core address (zero address)
     error InvalidWormholeCore();
-    
-    /// @notice Invalid owner address (zero address)
-    error InvalidOwner();
     
     /// @notice VAA verification failed
     error InvalidVAA();
@@ -180,13 +178,13 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
      * @param _wormholeCore Address of Wormhole Core Bridge
      * @param _initialOwner Address of contract owner
      * @dev Owner can add/remove trusted emitters
-     * @dev Both addresses must be non-zero
+     * @dev OpenZeppelin Ownable validates _initialOwner is non-zero
      */
     constructor(address _wormholeCore, address _initialOwner) 
         Ownable(_initialOwner) 
     {
         if (_wormholeCore == address(0)) revert InvalidWormholeCore();
-        if (_initialOwner == address(0)) revert InvalidOwner();
+        // Note: OpenZeppelin Ownable already validates _initialOwner != address(0)
         
         wormholeCore = IWormholeCore(_wormholeCore);
     }
@@ -201,6 +199,21 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
      */
     function getCidHash(string memory cid) public pure returns (bytes32) {
         return keccak256(bytes(cid));
+    }
+    
+    /**
+     * @notice Get unique key for CID + chain combination
+     * @param cidHash The hashed CID
+     * @param sourceChainId The Wormhole chain ID
+     * @return Unique key for mapping lookup
+     * @dev Same CID can exist on different chains with different keys
+     */
+    function getUniqueKey(bytes32 cidHash, uint16 sourceChainId) 
+        public 
+        pure 
+        returns (bytes32) 
+    {
+        return keccak256(abi.encodePacked(cidHash, sourceChainId));
     }
     
     /**
@@ -255,7 +268,7 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
      * 1. Parse and verify VAA using wormholeCore.parseAndVerifyVM()
      * 2. Check replay protection (consumedVAAs)
      * 3. Validate emitter (trustedEmitters)
-     * 4. Extract payload and call receiveWormholeMessage()
+     * 4. Extract payload and process internally
      * 5. Mark VAA as consumed
      * 
      * @custom:reverts InvalidVAA if VAA verification fails
@@ -288,79 +301,68 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
             revert UntrustedEmitter(vm.emitterChainId, vm.emitterAddress);
         }
         
-        // Step 5: Process message (will store checkpoint)
-        this.receiveWormholeMessage(
+        // Step 5: Process message internally (pass real VAA hash)
+        _processCheckpoint(
             vm.payload,
             vm.emitterChainId,
-            vm.emitterAddress
+            vm.emitterAddress,
+            vaaHash  // ✅ CRITICAL: Pass the real Wormhole VAA hash
         );
         
         // Step 6: Mark VAA as consumed (after successful processing)
+        // NOTE: If processing reverts, VAA remains unconsumed for retry
         consumedVAAs[vaaHash] = true;
     }
     
     /**
-     * @notice Internal message reception handler
+     * @notice Internal checkpoint processing function
      * @param payload The encoded checkpoint message (CheckpointCodec format)
      * @param sourceChain The Wormhole chain ID
      * @param sourceAddress The emitter address (bytes32)
+     * @param vaaHash The real Wormhole VAA hash
      * @dev This function decodes, validates, and stores the checkpoint
      * 
-     * NOTE: This function is part of IWormholeReceiver interface.
-     * It's called by receiveCheckpoint() after VAA verification.
-     * Marked 'external' for interface compliance but should only be called
-     * by this contract via 'this.receiveWormholeMessage()'.
+     * CRITICAL: vaaHash MUST be the real Wormhole VM hash (vm.hash)
+     * NOT a computed hash from message content!
      * 
      * FLOW:
      * 1. Decode payload using CheckpointCodec
      * 2. Validate message (CheckpointCodec.validateWithErrors)
-     * 3. Check CID uniqueness
-     * 4. Compute VAA hash
-     * 5. Store checkpoint
-     * 6. Update indices
-     * 7. Emit event
+     * 3. Check CID uniqueness (per-chain)
+     * 4. Store checkpoint using REAL vaaHash
+     * 5. Update indices
+     * 6. Emit event
      * 
      * @custom:reverts InvalidMessage if decoding fails
      * @custom:reverts CheckpointExpired if message expired
      * @custom:reverts CheckpointTooOld if message too old
-     * @custom:reverts CIDAlreadyExists if CID already stored
+     * @custom:reverts CIDAlreadyExists if CID already stored on this chain
      */
-    function receiveWormholeMessage(
+    function _processCheckpoint(
         bytes memory payload,
         uint16 sourceChain,
-        bytes32 sourceAddress
-    ) external override {
-        // Security: Only allow calls from this contract
-        // (called via this.receiveWormholeMessage in receiveCheckpoint)
-        require(msg.sender == address(this), "Internal only");
-        
+        bytes32 sourceAddress,
+        bytes32 vaaHash
+    ) internal {
         // Step 1: Decode message using CheckpointCodec
-        CheckpointCodec.StorachaCheckpointMessage memory message;
-        
-        try this._decodeMessage(payload) returns (
-            CheckpointCodec.StorachaCheckpointMessage memory decoded
-        ) {
-            message = decoded;
-        } catch {
-            revert InvalidMessage("Decode failed");
-        }
+        // abi.decode will revert with clear error if payload is malformed
+        CheckpointCodec.StorachaCheckpointMessage memory message = 
+            CheckpointCodec.decode(payload);
         
         // Step 2: Validate message
         // CheckpointCodec.validateWithErrors will revert with specific errors if invalid
         CheckpointCodec.validateWithErrors(message);
         
-        // Step 3: Check CID uniqueness
+        // Step 3: Check CID uniqueness PER CHAIN
+        // Same CID can be checkpointed on different chains
         bytes32 cidHash = getCidHash(message.cid);
-        if (cidHashToVaaHash[cidHash] != bytes32(0)) {
+        bytes32 uniqueKey = keccak256(abi.encodePacked(cidHash, sourceChain));
+        
+        if (cidHashToVaaHash[uniqueKey] != bytes32(0)) {
             revert CIDAlreadyExists(cidHash);
         }
         
-        // Step 4: Compute VAA hash from message components
-        // We reconstruct this from the message hash since we don't have
-        // access to the original encodedVaa in this function
-        bytes32 vaaHash = CheckpointCodec.getMessageHash(message);
-        
-        // Step 5: Store checkpoint
+        // Step 4: Store checkpoint using REAL Wormhole VAA hash
         checkpoints[vaaHash] = StoredCheckpoint({
             cid: message.cid,
             tag: message.tag,
@@ -372,14 +374,14 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
             receivedAt: block.timestamp
         });
         
-        // Step 6: Update indices
-        cidHashToVaaHash[cidHash] = vaaHash;
+        // Step 5: Update indices (CID + chain -> VAA hash)
+        cidHashToVaaHash[uniqueKey] = vaaHash;
         
-        // Step 7: Update counters
+        // Step 6: Update counters
         checkpointCountByChain[sourceChain]++;
         totalCheckpoints++;
         
-        // Step 8: Emit event
+        // Step 7: Emit event
         emit CheckpointReceived(
             vaaHash,
             cidHash,
@@ -393,98 +395,349 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     }
     
     /**
-     * @notice Helper function to decode message (for try-catch)
-     * @param payload The encoded message
-     * @return Decoded message
-     * @dev External function needed for try-catch pattern
+     * @notice IWormholeReceiver interface implementation (STUB)
+     * @dev This function is NOT used. Use receiveCheckpoint() instead.
+     * Kept for interface compliance only.
      */
-    function _decodeMessage(bytes memory payload) 
-        external 
-        pure 
-        returns (CheckpointCodec.StorachaCheckpointMessage memory) 
-    {
-        return CheckpointCodec.decode(payload);
+    function receiveWormholeMessage(
+        bytes memory,
+        uint16,
+        bytes32
+    ) external override pure {
+        revert("Use receiveCheckpoint() instead");
     }
     
-    // ============ ACCESS CONTROL FUNCTIONS (TO BE IMPLEMENTED) ============
+    // ============ ACCESS CONTROL FUNCTIONS ============
     
     /**
-     * @notice Add a trusted emitter
-     * @param chainId Wormhole chain ID
-     * @param emitter Emitter address (bytes32 format)
-     * @dev Implementation in Sub-task 5.3
-     * @dev Only owner can call
+     * @notice Add a trusted emitter to the whitelist
+     * @param chainId Wormhole chain ID (e.g., 10004 for Base Sepolia)
+     * @param emitter Emitter address in bytes32 format (publisher contract)
+     * @dev Only owner can call this function
+     * @dev Emitter address should be the bytes32 representation of the publisher contract
+     * 
+     * USAGE:
+     * - Deploy StorachaCheckpointer on source chain (e.g., Base Sepolia)
+     * - Convert address to bytes32: bytes32(uint256(uint160(address)))
+     * - Call addTrustedEmitter(10004, emitterBytes32)
+     * 
+     * VALIDATION:
+     * - Chain ID must be non-zero
+     * - Emitter must be non-zero
+     * - Emitter must not already be trusted
+     * 
+     * @custom:reverts EmitterAlreadyTrusted if emitter already whitelisted
      */
     function addTrustedEmitter(uint16 chainId, bytes32 emitter) 
         external 
         onlyOwner 
     {
-        // Sub-task 5.3: Access Control & Trusted Emitters
-        revert("Not implemented - Sub-task 5.3");
+        // Validate chain ID
+        if (chainId == 0) {
+            revert InvalidMessage("Chain ID cannot be zero");
+        }
+        
+        // Validate emitter address
+        if (emitter == bytes32(0)) {
+            revert ZeroAddress();
+        }
+        
+        // Check if already trusted
+        if (trustedEmitters[chainId][emitter]) {
+            revert EmitterAlreadyTrusted(chainId, emitter);
+        }
+        
+        // Add to whitelist
+        trustedEmitters[chainId][emitter] = true;
+        
+        // Emit event
+        emit TrustedEmitterAdded(chainId, emitter);
     }
     
     /**
-     * @notice Remove a trusted emitter
+     * @notice Remove a trusted emitter from the whitelist
      * @param chainId Wormhole chain ID
-     * @param emitter Emitter address (bytes32 format)
-     * @dev Implementation in Sub-task 5.3
-     * @dev Only owner can call
+     * @param emitter Emitter address in bytes32 format
+     * @dev Only owner can call this function
+     * 
+     * USAGE:
+     * - Call removeTrustedEmitter(chainId, emitterBytes32) to revoke trust
+     * - After removal, messages from this emitter will be rejected
+     * 
+     * VALIDATION:
+     * - Chain ID must be non-zero
+     * - Emitter must be non-zero
+     * - Emitter must be currently trusted
+     * 
+     * @custom:reverts EmitterNotTrusted if emitter not in whitelist
      */
     function removeTrustedEmitter(uint16 chainId, bytes32 emitter) 
         external 
         onlyOwner 
     {
-        // Sub-task 5.3: Access Control & Trusted Emitters
-        revert("Not implemented - Sub-task 5.3");
+        // Validate chain ID
+        if (chainId == 0) {
+            revert InvalidMessage("Chain ID cannot be zero");
+        }
+        
+        // Validate emitter address
+        if (emitter == bytes32(0)) {
+            revert ZeroAddress();
+        }
+        
+        // Check if currently trusted
+        if (!trustedEmitters[chainId][emitter]) {
+            revert EmitterNotTrusted(chainId, emitter);
+        }
+        
+        // Remove from whitelist
+        trustedEmitters[chainId][emitter] = false;
+        
+        // Emit event
+        emit TrustedEmitterRemoved(chainId, emitter);
     }
     
-    // ============ QUERY FUNCTIONS (TO BE IMPLEMENTED) ============
+    /**
+     * @notice Batch add multiple trusted emitters
+     * @param chainIds Array of Wormhole chain IDs
+     * @param emitters Array of emitter addresses (bytes32 format)
+     * @dev Only owner can call this function
+     * @dev Arrays must have the same length
+     * @dev Useful for initial setup or migrating to new publishers
+     * 
+     * EXAMPLE:
+     * chainIds = [10004, 6, 10002]  // Base, Avalanche, Ethereum
+     * emitters = [publisher1, publisher2, publisher3]
+     */
+    function addTrustedEmitterBatch(
+        uint16[] calldata chainIds,
+        bytes32[] calldata emitters
+    ) external onlyOwner {
+        // Validate array lengths match
+        if (chainIds.length != emitters.length) {
+            revert InvalidMessage("Array length mismatch");
+        }
+        
+        // Add each emitter
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            // Reuse single-add logic (includes all validation)
+            // Note: We don't use 'this.addTrustedEmitter' to save gas
+            uint16 chainId = chainIds[i];
+            bytes32 emitter = emitters[i];
+            
+            // Validate
+            if (chainId == 0) {
+                revert InvalidMessage("Chain ID cannot be zero");
+            }
+            if (emitter == bytes32(0)) {
+                revert ZeroAddress();
+            }
+            if (trustedEmitters[chainId][emitter]) {
+                revert EmitterAlreadyTrusted(chainId, emitter);
+            }
+            
+            // Add
+            trustedEmitters[chainId][emitter] = true;
+            
+            // Emit
+            emit TrustedEmitterAdded(chainId, emitter);
+        }
+    }
+    
+    // ============ QUERY FUNCTIONS ============
     
     /**
      * @notice Get checkpoint by VAA hash
-     * @param vaaHash The VAA hash
-     * @return checkpoint The stored checkpoint
-     * @dev Implementation in Sub-task 5.4
-     * @dev Reverts if checkpoint doesn't exist
+     * @param vaaHash The VAA hash (from Wormhole VM)
+     * @return checkpoint The stored checkpoint with all metadata
+     * @dev This is the primary way to query checkpoints
+     * 
+     * USAGE:
+     * - After receiving a VAA, the vaaHash is emitted in CheckpointReceived event
+     * - Use this hash to query the full checkpoint data
+     * 
+     * RETURNS:
+     * - StoredCheckpoint struct with all fields
+     * - If checkpoint doesn't exist, all fields will be default values
+     * - Use checkpointExists(vaaHash) to verify existence first
+     * 
+     * @custom:reverts CheckpointNotFound if checkpoint doesn't exist
      */
     function getCheckpoint(bytes32 vaaHash) 
         external 
         view 
         returns (StoredCheckpoint memory checkpoint) 
     {
-        // Sub-task 5.4: Query Functions & Utilities
-        revert("Not implemented - Sub-task 5.4");
+        // Check if checkpoint exists
+        if (!checkpointExists(vaaHash)) {
+            revert CheckpointNotFound(vaaHash);
+        }
+        
+        // Return checkpoint from storage
+        return checkpoints[vaaHash];
     }
     
     /**
-     * @notice Get checkpoint by CID
-     * @param cid The IPFS CID
-     * @return checkpoint The stored checkpoint
-     * @dev Implementation in Sub-task 5.4
-     * @dev Uses cidHashToVaaHash mapping for lookup
-     * @dev Reverts if checkpoint doesn't exist
+     * @notice Get checkpoint by CID and source chain
+     * @param cid The IPFS CID string
+     * @param sourceChainId The Wormhole chain ID where checkpoint was created
+     * @return checkpoint The stored checkpoint with all metadata
+     * @dev Uses cidHashToVaaHash mapping for efficient lookup
+     * 
+     * USAGE:
+     * - Query checkpoint using the IPFS CID and source chain
+     * - Same CID can exist on multiple chains (one per chain)
+     * 
+     * FLOW:
+     * 1. Hash the CID string to bytes32
+     * 2. Compute unique key from CID hash + chain ID
+     * 3. Look up VAA hash in cidHashToVaaHash mapping
+     * 4. Return checkpoint using VAA hash
+     * 
+     * @custom:reverts CheckpointNotFound if CID not found on specified chain
      */
-    function getCheckpointByCid(string calldata cid) 
+    function getCheckpointByCid(string calldata cid, uint16 sourceChainId) 
         external 
         view 
         returns (StoredCheckpoint memory checkpoint) 
     {
-        // Sub-task 5.4: Query Functions & Utilities
-        revert("Not implemented - Sub-task 5.4");
+        // Hash the CID
+        bytes32 cidHash = getCidHash(cid);
+        
+        // Compute unique key (CID + chain)
+        bytes32 uniqueKey = keccak256(abi.encodePacked(cidHash, sourceChainId));
+        
+        // Look up VAA hash
+        bytes32 vaaHash = cidHashToVaaHash[uniqueKey];
+        
+        // Check if exists
+        if (vaaHash == bytes32(0)) {
+            revert CheckpointNotFound(bytes32(0));
+        }
+        
+        // Return checkpoint
+        return checkpoints[vaaHash];
     }
     
     /**
      * @notice Check if checkpoint is valid (exists and not expired)
      * @param vaaHash The VAA hash
-     * @return valid True if checkpoint exists and not expired
-     * @dev Implementation in Sub-task 5.4
+     * @return valid True if checkpoint exists and is not expired
+     * @dev This is a convenience function combining existence and expiration checks
+     * 
+     * USAGE:
+     * - Before using checkpoint data, verify it's still valid
+     * - Returns false if checkpoint doesn't exist
+     * - Returns false if checkpoint has expired
+     * 
+     * LOGIC:
+     * valid = checkpointExists(vaaHash) && !isExpired(vaaHash)
      */
     function isCheckpointValid(bytes32 vaaHash) 
         external 
         view 
         returns (bool valid) 
     {
-        // Sub-task 5.4: Query Functions & Utilities
-        revert("Not implemented - Sub-task 5.4");
+        // Check existence and expiration
+        return checkpointExists(vaaHash) && !isExpired(vaaHash);
+    }
+    
+    /**
+     * @notice Get the VAA hash for a given CID and source chain
+     * @param cid The IPFS CID string
+     * @param sourceChainId The Wormhole chain ID where checkpoint was created
+     * @return vaaHash The VAA hash, or bytes32(0) if not found
+     * @dev Useful for checking if a CID exists on a chain without reverting
+     * 
+     * USAGE:
+     * - Check if CID has been checkpointed on a specific chain
+     * - Get VAA hash to use with other query functions
+     * - Returns bytes32(0) if CID not found (does not revert)
+     */
+    function getVaaHashByCid(string calldata cid, uint16 sourceChainId) 
+        external 
+        view 
+        returns (bytes32 vaaHash) 
+    {
+        bytes32 cidHash = getCidHash(cid);
+        bytes32 uniqueKey = getUniqueKey(cidHash, sourceChainId);
+        return cidHashToVaaHash[uniqueKey];
+    }
+    
+    /**
+     * @notice Get checkpoint creation timestamp (on source chain)
+     * @param vaaHash The VAA hash
+     * @return timestamp The creation timestamp
+     * @dev Returns the timestamp when checkpoint was created on source chain
+     * @custom:reverts CheckpointNotFound if checkpoint doesn't exist
+     */
+    function getCheckpointTimestamp(bytes32 vaaHash) 
+        external 
+        view 
+        returns (uint256 timestamp) 
+    {
+        if (!checkpointExists(vaaHash)) {
+            revert CheckpointNotFound(vaaHash);
+        }
+        return checkpoints[vaaHash].timestamp;
+    }
+    
+    /**
+     * @notice Get checkpoint expiration timestamp
+     * @param vaaHash The VAA hash
+     * @return expiresAt The expiration timestamp
+     * @dev Returns the timestamp when checkpoint expires
+     * @custom:reverts CheckpointNotFound if checkpoint doesn't exist
+     */
+    function getCheckpointExpiration(bytes32 vaaHash) 
+        external 
+        view 
+        returns (uint256 expiresAt) 
+    {
+        if (!checkpointExists(vaaHash)) {
+            revert CheckpointNotFound(vaaHash);
+        }
+        return checkpoints[vaaHash].expiresAt;
+    }
+    
+    /**
+     * @notice Get time remaining until expiration
+     * @param vaaHash The VAA hash
+     * @return remaining Seconds until expiration (0 if expired)
+     * @dev Returns 0 if checkpoint doesn't exist or has expired
+     */
+    function getTimeRemaining(bytes32 vaaHash) 
+        external 
+        view 
+        returns (uint256 remaining) 
+    {
+        if (!checkpointExists(vaaHash)) {
+            return 0;
+        }
+        
+        uint256 expiresAt = checkpoints[vaaHash].expiresAt;
+        
+        if (block.timestamp >= expiresAt) {
+            return 0;
+        }
+        
+        return expiresAt - block.timestamp;
+    }
+    
+    /**
+     * @notice Get checkpoint creator address
+     * @param vaaHash The VAA hash
+     * @return creator The creator address from source chain
+     * @custom:reverts CheckpointNotFound if checkpoint doesn't exist
+     */
+    function getCheckpointCreator(bytes32 vaaHash) 
+        external 
+        view 
+        returns (address creator) 
+    {
+        if (!checkpointExists(vaaHash)) {
+            revert CheckpointNotFound(vaaHash);
+        }
+        return checkpoints[vaaHash].creator;
     }
 }
