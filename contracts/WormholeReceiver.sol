@@ -127,6 +127,10 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     /// @notice Zero address provided
     error ZeroAddress();
     
+    /// @notice Direct call to receiveWormholeMessage not allowed
+    /// @dev Use receiveCheckpoint() instead
+    error DirectCallNotAllowed();
+    
     // ============ EVENTS ============
     
     /**
@@ -398,13 +402,16 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
      * @notice IWormholeReceiver interface implementation (STUB)
      * @dev This function is NOT used. Use receiveCheckpoint() instead.
      * Kept for interface compliance only.
+     * 
+     * WARNING: Calling this function directly will always revert.
+     * Use receiveCheckpoint(bytes encodedVaa) for proper VAA processing.
      */
     function receiveWormholeMessage(
         bytes memory,
         uint16,
         bytes32
-    ) external override pure {
-        revert("Use receiveCheckpoint() instead");
+    ) external pure override {
+        revert DirectCallNotAllowed();
     }
     
     // ============ ACCESS CONTROL FUNCTIONS ============
