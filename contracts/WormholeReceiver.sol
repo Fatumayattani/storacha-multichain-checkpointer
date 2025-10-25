@@ -727,6 +727,54 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     }
     
     /**
+     * @notice Get checkpoint by CID from any chain (first match)
+     * @param cid The IPFS CID string
+     * @param chainsToCheck Array of chain IDs to check (ordered by priority)
+     * @return checkpoint The first matching checkpoint found
+     * @dev Useful when you don't care which chain the checkpoint came from
+     * 
+     * USAGE:
+     * ```solidity
+     * // Check Base first, then Avalanche, then Ethereum
+     * uint16[] memory chains = new uint16[](3);
+     * chains[0] = 10004;  // Base Sepolia
+     * chains[1] = 6;      // Avalanche Fuji
+     * chains[2] = 10002;  // Ethereum Sepolia
+     * 
+     * StoredCheckpoint memory cp = receiver.getCheckpointByCidAnyChain(cid, chains);
+     * ```
+     * 
+     * PRIORITY:
+     * - Checks chains in array order
+     * - Returns first match found
+     * - Reverts if CID not found on any chain
+     * 
+     * TIP: Order chains by likelihood for better performance
+     * 
+     * @custom:reverts CheckpointNotFound if CID not found on any chain
+     */
+    function getCheckpointByCidAnyChain(
+        string calldata cid,
+        uint16[] calldata chainsToCheck
+    ) external view returns (StoredCheckpoint memory checkpoint) {
+        bytes32 cidHash = getCidHash(cid);
+        
+        // Check each chain in order
+        for (uint256 i = 0; i < chainsToCheck.length; i++) {
+            bytes32 uniqueKey = getUniqueKey(cidHash, chainsToCheck[i]);
+            bytes32 vaaHash = cidHashToVaaHash[uniqueKey];
+            
+            // If found on this chain, return it
+            if (vaaHash != bytes32(0)) {
+                return checkpoints[vaaHash];
+            }
+        }
+        
+        // Not found on any chain
+        revert CheckpointNotFound(bytes32(0));
+    }
+    
+    /**
      * @notice Get checkpoint creation timestamp (on source chain)
      * @param vaaHash The VAA hash
      * @return timestamp The creation timestamp
