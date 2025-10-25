@@ -814,6 +814,272 @@ describe("WormholeReceiver Contract", function () {
     });
   });
 
+  // ============ CONVENIENCE FUNCTIONS ============
+
+  describe("Convenience Functions", function () {
+    it("should query CID from any chain (first match)", async function () {
+      const { receiver, publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployFixture();
+
+      // Setup: Add trusted emitter for Base Sepolia
+      const chainId = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE;
+      const emitterAddress = ethers.zeroPadValue(
+        await publisher.getAddress(),
+        32
+      );
+      await receiver.connect(owner).addTrustedEmitter(chainId, emitterAddress);
+
+      // Create and receive checkpoint on Base Sepolia
+      const testCid =
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const testTag = ethers.encodeBytes32String("test-any-chain");
+      const duration = 86400;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+
+      const receipt = await tx.wait();
+
+      const wormholeAddress = await mockWormhole.getAddress();
+      const publishedEvent = receipt?.logs
+        .filter((log) => log.address === wormholeAddress)
+        .map((log) => mockWormhole.interface.parseLog(log))
+        .find((parsed) => parsed?.name === "MessagePublished");
+
+      const mockVaa = await mockWormhole.createMockVAA(
+        chainId,
+        emitterAddress,
+        publishedEvent!.args.sequence,
+        publishedEvent!.args.payload
+      );
+
+      await receiver.receiveCheckpoint(mockVaa);
+
+      // Query using getCheckpointByCidAnyChain - Base is first in list
+      const chainsToCheck = [
+        CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+      ];
+
+      const checkpoint = await receiver.getCheckpointByCidAnyChain(
+        testCid,
+        chainsToCheck
+      );
+
+      expect(checkpoint.cid).to.equal(testCid);
+      expect(checkpoint.tag).to.equal(testTag);
+      expect(checkpoint.sourceChainId).to.equal(chainId);
+    });
+
+    it("should query CID from any chain (later match)", async function () {
+      const { receiver, publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployFixture();
+
+      // Setup: Add trusted emitter for Avalanche
+      const chainId = CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE;
+      await mockWormhole.setChainId(chainId);
+
+      const emitterAddress = ethers.zeroPadValue(
+        await publisher.getAddress(),
+        32
+      );
+      await receiver.connect(owner).addTrustedEmitter(chainId, emitterAddress);
+
+      // Update publisher chain ID
+      const TestCheckpointer = await ethers.getContractFactory(
+        "TestStorachaCheckpointer"
+      );
+      const publisher2 = TestCheckpointer.attach(await publisher.getAddress());
+      await publisher2.setTestChainId(chainId);
+
+      // Create checkpoint
+      const testCid =
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const testTag = ethers.encodeBytes32String("test-avalanche");
+      const duration = 86400;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+
+      const receipt = await tx.wait();
+
+      const wormholeAddress = await mockWormhole.getAddress();
+      const publishedEvent = receipt?.logs
+        .filter((log) => log.address === wormholeAddress)
+        .map((log) => mockWormhole.interface.parseLog(log))
+        .find((parsed) => parsed?.name === "MessagePublished");
+
+      const mockVaa = await mockWormhole.createMockVAA(
+        chainId,
+        emitterAddress,
+        publishedEvent!.args.sequence,
+        publishedEvent!.args.payload
+      );
+
+      await receiver.receiveCheckpoint(mockVaa);
+
+      // Query: Base doesn't have it, Avalanche does (2nd in list)
+      const chainsToCheck = [
+        CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+      ];
+
+      const checkpoint = await receiver.getCheckpointByCidAnyChain(
+        testCid,
+        chainsToCheck
+      );
+
+      expect(checkpoint.cid).to.equal(testCid);
+      expect(checkpoint.sourceChainId).to.equal(chainId);
+    });
+
+    it("should revert when CID not found on any chain", async function () {
+      const { receiver } = await deployFixture();
+
+      const testCid =
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const chainsToCheck = [
+        CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+      ];
+
+      await expect(
+        receiver.getCheckpointByCidAnyChain(testCid, chainsToCheck)
+      ).to.be.revertedWithCustomError(receiver, "CheckpointNotFound");
+    });
+
+    it("should check CID existence on multiple chains", async function () {
+      const { receiver, publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployFixture();
+
+      // Setup: Add trusted emitters for Base and Ethereum
+      const baseChainId = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE;
+      const emitterAddress = ethers.zeroPadValue(
+        await publisher.getAddress(),
+        32
+      );
+      await receiver
+        .connect(owner)
+        .addTrustedEmitter(baseChainId, emitterAddress);
+
+      // Create checkpoint on Base Sepolia only
+      const testCid =
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const testTag = ethers.encodeBytes32String("test-existence");
+      const duration = 86400;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+
+      const receipt = await tx.wait();
+
+      const wormholeAddress = await mockWormhole.getAddress();
+      const publishedEvent = receipt?.logs
+        .filter((log) => log.address === wormholeAddress)
+        .map((log) => mockWormhole.interface.parseLog(log))
+        .find((parsed) => parsed?.name === "MessagePublished");
+
+      const mockVaa = await mockWormhole.createMockVAA(
+        baseChainId,
+        emitterAddress,
+        publishedEvent!.args.sequence,
+        publishedEvent!.args.payload
+      );
+
+      await receiver.receiveCheckpoint(mockVaa);
+
+      // Check existence on all three chains
+      const chainsToCheck = [
+        CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+      ];
+
+      const exists = await receiver.checkCidExistsOnChains(
+        testCid,
+        chainsToCheck
+      );
+
+      expect(exists).to.have.lengthOf(3);
+      expect(exists[0]).to.be.true; // Base Sepolia - exists
+      expect(exists[1]).to.be.false; // Avalanche Fuji - doesn't exist
+      expect(exists[2]).to.be.false; // Ethereum Sepolia - doesn't exist
+    });
+
+    it("should return all false when CID doesn't exist anywhere", async function () {
+      const { receiver } = await deployFixture();
+
+      const testCid =
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const chainsToCheck = [
+        CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+      ];
+
+      const exists = await receiver.checkCidExistsOnChains(
+        testCid,
+        chainsToCheck
+      );
+
+      expect(exists).to.have.lengthOf(3);
+      expect(exists[0]).to.be.false;
+      expect(exists[1]).to.be.false;
+      expect(exists[2]).to.be.false;
+    });
+
+    it("should handle empty chains array", async function () {
+      const { receiver } = await deployFixture();
+
+      const testCid =
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+      const chainsToCheck: number[] = [];
+
+      const exists = await receiver.checkCidExistsOnChains(
+        testCid,
+        chainsToCheck
+      );
+
+      expect(exists).to.have.lengthOf(0);
+    });
+  });
+
   // ============ INTEGRATION SUMMARY ============
 
   describe("Integration Summary", function () {
