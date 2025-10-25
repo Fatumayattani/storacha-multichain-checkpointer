@@ -775,6 +775,48 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
     }
     
     /**
+     * @notice Check if a CID exists on multiple chains
+     * @param cid The IPFS CID string
+     * @param chainsToCheck Array of chain IDs to check
+     * @return exists Array of booleans indicating existence on each chain
+     * @dev Useful for batch checking CID availability across chains
+     * 
+     * USAGE:
+     * ```typescript
+     * const chains = [10004, 6, 10002]; // Base, Avalanche, Ethereum
+     * const exists = await receiver.checkCidExistsOnChains(cid, chains);
+     * 
+     * if (exists[0]) console.log("CID exists on Base");
+     * if (exists[1]) console.log("CID exists on Avalanche");
+     * if (exists[2]) console.log("CID exists on Ethereum");
+     * ```
+     * 
+     * EFFICIENCY:
+     * - Single RPC call instead of multiple
+     * - Returns all results at once
+     * - Does not revert if CID not found
+     * 
+     * RETURNS:
+     * - Array of booleans (same length as chainsToCheck)
+     * - true = CID exists on that chain
+     * - false = CID does not exist on that chain
+     */
+    function checkCidExistsOnChains(
+        string calldata cid,
+        uint16[] calldata chainsToCheck
+    ) external view returns (bool[] memory exists) {
+        bytes32 cidHash = getCidHash(cid);
+        exists = new bool[](chainsToCheck.length);
+        
+        for (uint256 i = 0; i < chainsToCheck.length; i++) {
+            bytes32 uniqueKey = getUniqueKey(cidHash, chainsToCheck[i]);
+            exists[i] = cidHashToVaaHash[uniqueKey] != bytes32(0);
+        }
+        
+        return exists;
+    }
+    
+    /**
      * @notice Get checkpoint creation timestamp (on source chain)
      * @param vaaHash The VAA hash
      * @return timestamp The creation timestamp
