@@ -28,6 +28,7 @@
     "chai": "^5.3.3",
     "eslint": "^8.0.0",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
+    "hardhat": "^3.0.7",
     "husky": "^8.0.3",
     "lint-staged": "^15.0.0",
     "mocha": "^11.7.1",
