@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "./IAvailabilityVerifier.sol";
-import "./WormholeReceiver.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract ReentrancyGuard {
@@ -21,6 +20,8 @@ interface IWormhole {
         bytes calldata payload,
         uint8 consistencyLevel
     ) external payable returns (uint64 sequence);
+    
+    function messageFee() external view returns (uint256);
 }
 
 contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
@@ -78,7 +79,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         pricePerSecondWei = p;
     }
 
-    function _wormholeChainId() internal view returns (uint16) {
+    function _wormholeChainId() internal view virtual returns (uint16) {
         if (block.chainid == 84532) return 10004; // Base Sepolia
         if (block.chainid == 43113) return 6;     // Avalanche Fuji
         if (block.chainid == 11155111) return 10002; // Ethereum Sepolia
@@ -96,7 +97,15 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         require(duration > 0, "duration=0");
 
         uint256 cost = pricePerSecondWei * duration;
-        require(msg.value >= cost, "underpay");
+        uint256 wormholeFee = 0;
+        
+        if (publishToWormhole) {
+            require(address(wormhole) != address(0), "wormhole not set");
+            wormholeFee = IWormhole(address(wormhole)).messageFee();
+        }
+        
+        uint256 totalCost = cost + wormholeFee;
+        require(msg.value >= totalCost, "underpay");
 
         bytes32 cidHash = keccak256(bytes(cid));
         bool ok = verifier.isAvailable(cidHash, verifierData);
@@ -116,10 +125,6 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
 
         byCid[cidHash].push(id);
 
-        if (msg.value > cost) {
-            payable(msg.sender).transfer(msg.value - cost);
-        }
-
         if (publishToWormhole) {
             bytes memory payload = abi.encode(
                 uint8(1),
@@ -130,7 +135,11 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
                 block.timestamp,
                 _wormholeChainId() // ✅ fixed chain ID
             );
-            wormhole.publishMessage(0, payload, 1);
+            wormhole.publishMessage{value: wormholeFee}(0, payload, 1);
+        }
+
+        if (msg.value > totalCost) {
+            payable(msg.sender).transfer(msg.value - totalCost);
         }
 
         emit CheckpointCreated(
