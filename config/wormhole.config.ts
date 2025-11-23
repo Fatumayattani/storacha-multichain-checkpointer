@@ -21,6 +21,7 @@ export interface ChainConfig {
 /**
  * @notice Wormhole Core addresses by Wormhole chain ID
  * @dev Key is Wormhole chain ID (uint16), not EVM chain ID
+ * @dev Addresses verified from official Wormhole documentation
  */
 export const WORMHOLE_CORE_ADDRESSES: Record<number, string> = {
   [CHAIN_IDS.BASE_SEPOLIA_WORMHOLE]:
@@ -28,7 +29,7 @@ export const WORMHOLE_CORE_ADDRESSES: Record<number, string> = {
   [CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE]:
     "0x7bbcE28e64B3F8b84d876Ab298393c38ad7aac4C",
   [CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE]:
-    "0x4a8bc80Ed5a4067f1FFf25799C844145DDF9e5e5",
+    "0x4a8bc80Ed5a4067f1CCf107057b8270E0cC11A78",
 };
 
 /**
