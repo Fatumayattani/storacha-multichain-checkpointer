@@ -1,0 +1,11 @@
+{
+  "network": "Avalanche Fuji",
+  "chainId": 43113,
+  "wormholeChainId": 6,
+  "receiverAddress": "0x75d2b02f5980D4D1BB6cf7d3829A7a1F3BB1Ef76",
+  "wormholeCoreAddress": "0x7bbcE28e64B3F8b84d876Ab298393c38ad7aac4C",
+  "ownerAddress": "0x67C5967429280Ae900C3D16DEAEFB68e21A49FE7",
+  "deployedAt": "2025-11-22T20:02:58.516Z",
+  "transactionHash": "0x56c7b9d99bc0400c7f77b652359c1d7e45b4fe96e37862d78765c1be27dcc630",
+  "blockNumber": 47967770
+}
