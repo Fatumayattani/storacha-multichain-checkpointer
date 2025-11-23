@@ -101,7 +101,7 @@ This document tracks the implementation progress of the Wormhole-based cross-cha
 
 **Objective:** Deploy to testnets and validate cross-chain functionality
 
-#### Task 3.1: Integration Test Enhancement ⏭️ **NEXT**
+#### Task 3.1: Integration Test Enhancement ✅ **done**
 
 **Priority:** HIGH  
 **Estimated Time:** 2-3 days
@@ -150,7 +150,7 @@ This document tracks the implementation progress of the Wormhole-based cross-cha
 **Script Requirements:**
 
 1. **Deployment Script:**
-   - Deploy CheckpointCodec library
+   - CheckpointCodec library:just embedded inside WormholeReceiver
    - Deploy WormholeReceiver with library linkage
    - Save deployment addresses to artifacts
    - Output configuration instructions
