@@ -4,7 +4,7 @@
  * @dev Contains Guardian RPC, consistency level, and Wormhole Core addresses
  */
 
-import { CHAIN_IDS } from "../constants/chainIds.js";
+import { CHAIN_IDS } from "../constants/chainIds.ts";
 
 /**
  * @notice Chain-specific Wormhole configuration
