@@ -11,6 +11,8 @@ import {
 } from "@certusone/wormhole-sdk";
 
 dotenv.config();
+console.log("RPC_URL loaded:", process.env.RPC_URL?.slice(0, 20) + "..."); // only first part for safety
+console.log("PRIVATE_KEY loaded:", !!process.env.PRIVATE_KEY);
 
 const RPC_URL = process.env.RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
@@ -90,12 +92,15 @@ export async function publishCheckpoint(
 }
 
 // Run with: npx ts-node scripts/publisher.ts
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  (async () => {
+(async () => {
+  try {
     const cid = "bafyExampleCid123";
     const tag = ethers.utils.formatBytes32String("file1");
     const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 
-    await publishCheckpoint(cid, tag, expiresAt);
-  })();
-}
+    const result = await publishCheckpoint(cid, tag, expiresAt);
+    console.log("✅ Publisher result:", result);
+  } catch (err) {
+    console.error("❌ Error running publisher:", err);
+  }
+})();
