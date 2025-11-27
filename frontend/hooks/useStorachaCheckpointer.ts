@@ -6,13 +6,14 @@ import {
   useReadContract,
 } from "wagmi";
 import { parseEther, encodePacked, keccak256 } from "viem";
-import { ABI as STORACHA_CHECKPOINTER_ABI } from "../constants";
-
-// Mock/test contract addresses - replace with actual when deployed
-const CONTRACT_ADDRESSES = {
-  84532: "0x1234567890123456789012345678901234567890", // Base Sepolia (mock)
-  43113: "0x1234567890123456789012345678901234567890", // Avalanche Fuji (mock)
-} as const;
+import {
+  getContractAddress,
+  getContractABI,
+  ContractType,
+  CHAIN_IDS,
+  isContractDeployed,
+  type SupportedChainId,
+} from "../lib/contracts";
 
 export interface CreateCheckpointParams {
   cid: string;
@@ -36,9 +37,14 @@ export function useStorachaCheckpointer() {
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Determine contract type based on chain
+  const contractType = chain?.id === CHAIN_IDS.BASE_SEPOLIA
+    ? ContractType.PUBLISHER
+    : ContractType.RECEIVER;
+
   // Get contract address for current chain
   const contractAddress = chain?.id
-    ? CONTRACT_ADDRESSES[chain.id as keyof typeof CONTRACT_ADDRESSES]
+    ? getContractAddress(chain.id as SupportedChainId, contractType)
     : null;
 
   // Contract write
@@ -56,12 +62,10 @@ export function useStorachaCheckpointer() {
   // Read price per second
   const { data: pricePerSecond } = useReadContract({
     address: contractAddress as `0x${string}`,
-    abi: STORACHA_CHECKPOINTER_ABI,
+    abi: getContractABI(),
     functionName: "pricePerSecondWei",
     query: {
-      enabled:
-        !!contractAddress &&
-        contractAddress !== "0x1234567890123456789012345678901234567890",
+      enabled: !!contractAddress && chain?.id !== undefined,
     },
   });
 
@@ -84,12 +88,9 @@ export function useStorachaCheckpointer() {
         throw new Error("No chain connected");
       }
 
-      if (
-        !contractAddress ||
-        contractAddress === "0x1234567890123456789012345678901234567890"
-      ) {
+      if (!contractAddress) {
         throw new Error(
-          `Contract not deployed on ${chain.name}. Using mock address for testing.`
+          `Contract not deployed on ${chain.name}. Please check your environment configuration.`
         );
       }
 
@@ -124,7 +125,7 @@ export function useStorachaCheckpointer() {
         // Call the contract
         writeContract({
           address: contractAddress as `0x${string}`,
-          abi: STORACHA_CHECKPOINTER_ABI,
+          abi: getContractABI(),
           functionName: "createCheckpoint",
           args: [
             params.cid,
@@ -151,11 +152,7 @@ export function useStorachaCheckpointer() {
     async (
       tag: string
     ): Promise<{ checkpoint: Checkpoint; id: bigint } | null> => {
-      if (
-        !contractAddress ||
-        !address ||
-        contractAddress === "0x1234567890123456789012345678901234567890"
-      ) {
+      if (!contractAddress || !address) {
         return null;
       }
 
@@ -184,9 +181,8 @@ export function useStorachaCheckpointer() {
   return {
     // Contract info
     contractAddress,
-    isContractAvailable:
-      !!contractAddress &&
-      contractAddress !== "0x1234567890123456789012345678901234567890",
+    isContractAvailable: !!contractAddress,
+    contractType,
     pricePerSecond,
 
     // Transaction state

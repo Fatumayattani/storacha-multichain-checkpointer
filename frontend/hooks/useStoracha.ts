@@ -21,55 +21,99 @@ export function useStoracha() {
   );
   const [error, setError] = useState<string | null>(null);
 
-  const initializeClient = useCallback(async () => {
+  const initializeClient = useCallback(async (email?: string) => {
     try {
       setError(null);
       console.log("🔄 Creating Storacha client...");
       const storachaClient = await create();
 
-      // Check if there's already a current space
-      let currentSpace = storachaClient.currentSpace();
+      // Check all available spaces
+      const allSpaces = storachaClient.spaces();
+      console.log("📋 All available spaces:", allSpaces.map(s => s.did()));
 
-      if (!currentSpace) {
-        console.log("🔄 No current space found, need to set up account...");
+      // Check for accounts (safely)
+      try {
+        const accounts = storachaClient.accounts();
+        if (Array.isArray(accounts)) {
+          console.log("👤 Available accounts:", accounts.map(a => a.did()));
+        } else {
+          console.log("👤 Accounts:", accounts);
+        }
+      } catch (accountError) {
+        console.log("⚠️ Could not list accounts:", accountError);
+      }
 
-        // For testing, we'll prompt user to login (in a real app, you'd handle this in UI)
-        console.log(
-          "⚠️  Space setup required. This might require email login..."
-        );
-
+      // If email is provided, try login flow
+      if (email) {
+        console.log(`🔄 Attempting login with email: ${email}`);
         try {
-          // Try to create space with account (this may trigger login flow)
-          console.log("🔄 Creating space with account setup...");
-          const space = await storachaClient.createSpace("checkpointer-space");
-          console.log("✅ Space created:", space.did());
-          currentSpace = storachaClient.currentSpace();
-        } catch (spaceError) {
-          console.log(
-            "⚠️  Space creation requires account. Error:",
-            spaceError
-          );
+          // Validate email format
+          if (!email.includes('@')) {
+            throw new Error('Invalid email format');
+          }
+          // Try to login - this might use cached credentials
+          const account = await storachaClient.login(email as `${string}@${string}`);
+          console.log("✅ Login initiated for:", email);
 
-          // Provide helpful error message
-          const helpMessage = `
-🔧 Storacha Setup Required:
-
-1. The Storacha client needs an account to create spaces
-2. This typically requires email verification
-3. For testing, you might need to:
-   - Create account manually at https://console.storacha.network
-   - Use the CLI: npm install -g @storacha/cli && storacha login
-   - Or handle the login flow in your app
-
-For MVP testing, we can:
-- Skip upload tests and focus on CID verification
-- Or set up proper Storacha account first`;
-
-          throw new Error(helpMessage);
+          // Check if we need to wait for verification
+          try {
+            console.log("⏳ Checking payment plan...");
+            await account.plan.wait();
+            console.log("✅ Payment plan confirmed");
+          } catch (planError) {
+            console.warn("⚠️ Could not verify plan immediately:", planError);
+          }
+        } catch (loginError) {
+          console.warn("⚠️ Login flow issue:", loginError);
+          // Continue anyway - might already be logged in
         }
       }
 
-      console.log("✅ Storacha client ready with space:", currentSpace?.did());
+      // Re-check spaces after login attempt
+      const spacesAfterLogin = storachaClient.spaces();
+      console.log("📋 Spaces after login:", spacesAfterLogin.map(s => s.did()));
+
+      // Look for the provisioned space
+      const PROVISIONED_SPACE_DID = "did:key:z6MkvDg2cshZhnktNyephg6Dg1Cvf2qJGdinq5ELgTnpm6vB";
+      const provisionedSpace = spacesAfterLogin.find(s => s.did() === PROVISIONED_SPACE_DID);
+
+      if (provisionedSpace) {
+        console.log("✅ Found your provisioned space!");
+        await storachaClient.setCurrentSpace(provisionedSpace.did());
+        console.log("✅ Set current space to:", provisionedSpace.did());
+        setClient(storachaClient);
+        return storachaClient;
+      }
+
+      // Get current space
+      let currentSpace = storachaClient.currentSpace();
+
+      if (!currentSpace) {
+        throw new Error(
+          "⚠️ No space available!\n\n" +
+          "Available spaces: " + spacesAfterLogin.map(s => s.did()).join(", ") + "\n\n" +
+          "Expected provisioned space: " + PROVISIONED_SPACE_DID + "\n\n" +
+          "Please ensure you're logged in at console.storacha.network"
+        );
+      }
+
+      const spaceDid = currentSpace.did();
+      console.log("📍 Current space:", spaceDid);
+
+      // Warn if not using the provisioned space
+      if (spaceDid !== PROVISIONED_SPACE_DID) {
+        console.warn("⚠️ Not using your provisioned space!");
+        console.warn("Current:", spaceDid);
+        console.warn("Expected:", PROVISIONED_SPACE_DID);
+        throw new Error(
+          "⚠️ Using wrong space!\n\n" +
+          "Current space: " + spaceDid + "\n" +
+          "Your provisioned space: " + PROVISIONED_SPACE_DID + "\n\n" +
+          "This space may not have billing attached. Uploads might fail."
+        );
+      }
+
+      console.log("✅ Storacha client ready with provisioned space:", currentSpace.did());
       setClient(storachaClient);
       return storachaClient;
     } catch (err) {
@@ -108,6 +152,13 @@ For MVP testing, we can:
           "to space:",
           currentSpace.did()
         );
+
+        // Log all available spaces for debugging
+        const spaces = client.spaces();
+        console.log("📋 Available spaces:", spaces.map(s => s.did()));
+
+        // Check if space has account
+        console.log("🔍 Checking space details...");
 
         // Use correct Storacha client API
         const cid = await client.uploadFile(file);
@@ -174,12 +225,43 @@ For MVP testing, we can:
     [client, uploadFile]
   );
 
+  const addExistingSpace = useCallback(
+    async (delegationProof: any) => {
+      try {
+        setError(null);
+        if (!client) {
+          throw new Error("Client not initialized. Call initializeClient first.");
+        }
+
+        console.log("🔄 Adding existing space from delegation...");
+        const sharedSpace = await client.addSpace(delegationProof);
+
+        console.log("✅ Space added successfully!");
+        console.log(`📍 Space DID: ${sharedSpace.did()}`);
+
+        // Set as current space
+        await client.setCurrentSpace(sharedSpace.did());
+        console.log("✅ Set as current space");
+
+        return sharedSpace;
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to add space";
+        console.error("❌ Add space error:", err);
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      }
+    },
+    [client]
+  );
+
   return {
     client,
     isUploading,
     uploadProgress,
     error,
     initializeClient,
+    addExistingSpace,
     uploadFile,
     uploadMultipleFiles,
     clearError: () => setError(null),

@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  env: {
+    NEXT_PUBLIC_BASE_SEPOLIA_PUBLISHER_ADDRESS: process.env.NEXT_PUBLIC_BASE_SEPOLIA_PUBLISHER_ADDRESS || '',
+    NEXT_PUBLIC_FUJI_RECEIVER_ADDRESS: process.env.NEXT_PUBLIC_FUJI_RECEIVER_ADDRESS || '',
+    NEXT_PUBLIC_SUPPORTED_CHAINS: process.env.NEXT_PUBLIC_SUPPORTED_CHAINS || '84532,43113',
+    NEXT_PUBLIC_DEFAULT_CHAIN_ID: process.env.NEXT_PUBLIC_DEFAULT_CHAIN_ID || '84532',
+    NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
+  },
 };
 
 export default nextConfig;
