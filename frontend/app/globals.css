@@ -1,26 +1,80 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8f4fc;
+  --background-secondary: #ffffff;
+  --foreground: #1a1a2e;
+  --foreground-muted: #4a4a68;
+  --accent: #dc2626;
+  --accent-hover: #b91c1c;
+  --card-bg: #ffffff;
+  --card-border: #1a1a2e;
+  --input-bg: #ffffff;
+  --input-border: #d1d5db;
+  --success: #16a34a;
+  --gradient-start: #eee4f2;
+  --gradient-end: #f0e6f4;
+}
+
+.dark {
+  --background: #0f0f1a;
+  --background-secondary: #1a1a2e;
+  --foreground: #f0f0f5;
+  --foreground-muted: #a0a0b8;
+  --accent: #ef4444;
+  --accent-hover: #f87171;
+  --card-bg: #1a1a2e;
+  --card-border: #3a3a5e;
+  --input-bg: #252540;
+  --input-border: #3a3a5e;
+  --success: #22c55e;
+  --gradient-start: #0f0f1a;
+  --gradient-end: #1a1a2e;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-secondary: var(--background-secondary);
   --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-card-bg: var(--card-bg);
+  --color-card-border: var(--card-border);
+  --color-input-bg: var(--input-bg);
+  --color-input-border: var(--input-border);
+  --color-success: var(--success);
+  --color-gradient-start: var(--gradient-start);
+  --color-gradient-end: var(--gradient-end);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.2s ease;
+}
+
+.dark ::-webkit-scrollbar {
+  width: 10px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--card-border);
+  border-radius: 5px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground-muted);
 }
