@@ -1,4 +1,4 @@
-'use client'
+"use client";
 
 import React, { useState } from 'react'
 import { useStoracha } from '@/hooks/useStoracha'
@@ -24,8 +24,8 @@ export default function TestPage() {
     error: storachaError, 
     initializeClient, 
     uploadFile,
-    clearError: clearStorachaError
-  } = useStoracha()
+    clearError: clearStorachaError,
+  } = useStoracha();
 
   const {
     contractAddress,
@@ -40,29 +40,80 @@ export default function TestPage() {
     error: contractError,
     calculateCost,
     reset: resetContract,
-    clearError: clearContractError
-  } = useStorachaCheckpointer()
+    clearError: clearContractError,
+  } = useStorachaCheckpointer();
 
   const {
     isVerifying,
     verificationResult,
     error: cidError,
-    clearError: clearCIDError
-  } = useCIDVerification()
+    clearError: clearCIDError,
+  } = useCIDVerification();
 
   const addResult = (result: string) => {
-    setTestResults(prev => [...prev, `${new Date().toLocaleTimeString()}: ${result}`])
-  }
+    setTestResults((prev) => [
+      ...prev,
+      `${new Date().toLocaleTimeString()}: ${result}`,
+    ]);
+  };
 
   const testStorachaInit = async () => {
     try {
-      addResult('🔄 Testing Storacha client initialization...')
-      await initializeClient()
-      addResult('✅ Storacha client initialized successfully!')
+      addResult("🔄 Testing Storacha client initialization...");
+      if (storachaEmail) {
+        addResult(`📧 Logging in with: ${storachaEmail}`);
+        addResult(
+          "⚠️ Check your email for verification link if this is first time!"
+        );
+      }
+      await initializeClient(storachaEmail || undefined);
+      addResult("✅ Storacha client initialized successfully!");
+      const currentSpaceDid = client?.currentSpace()?.did();
+      if (currentSpaceDid) {
+        addResult(`📍 Using space: ${currentSpaceDid}`);
+      }
     } catch (error) {
-      addResult(`❌ Storacha init failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `❌ Storacha init failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
+
+  // Test 1b: Import Existing Space
+  const testImportSpace = async () => {
+    try {
+      if (!delegationProof) {
+        addResult("❌ Please paste your delegation proof first");
+        return;
+      }
+
+      if (!client) {
+        addResult(
+          '❌ Please initialize Storacha client first (click "Test Storacha Init")'
+        );
+        return;
+      }
+
+      addResult("🔄 Importing existing space from delegation...");
+
+      // Parse the delegation proof (could be JSON string)
+      let proof;
+      try {
+        proof = JSON.parse(delegationProof);
+      } catch {
+        // If not JSON, try to use as-is
+        proof = delegationProof;
+      }
+
+      const space = await addExistingSpace(proof);
+      addResult("✅ Space imported successfully!");
+      addResult(`📍 Space DID: ${space.did()}`);
+    } catch (error) {
+      addResult(
+        `❌ Import space failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+    }
+  };
 
   const testCIDVerification = async () => {
     try {
@@ -81,142 +132,160 @@ export default function TestPage() {
       })
 
       if (result.isAvailable) {
-        const url = getIPFSUrl(testCID, result)
-        addResult(`🔗 Best URL: ${url}`)
+        const url = getIPFSUrl(testCID, result);
+        addResult(`🔗 Best URL: ${url}`);
       }
     } catch (error) {
-      addResult(`❌ CID verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `❌ CID verification failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
 
   const testFileUpload = async () => {
     if (!testFile) {
-      addResult('❌ Please select a file first')
-      return
+      addResult("❌ Please select a file first");
+      return;
     }
 
     if (!client) {
-      addResult('❌ Storacha client not initialized. Run init test first.')
-      return
+      addResult("❌ Storacha client not initialized. Run init test first.");
+      return;
     }
 
     try {
-      addResult(`🔄 Testing file upload: ${testFile.name} (${testFile.size} bytes)`)
-      const result = await uploadFile(testFile)
-      
-      addResult('✅ File uploaded successfully!')
-      addResult(`   CID: ${result.cid}`)
-      addResult(`   Size: ${result.size} bytes`)
-      addResult(`   Name: ${result.name}`)
+      addResult(
+        `🔄 Testing file upload: ${testFile.name} (${testFile.size} bytes)`
+      );
+      const result = await uploadFile(testFile);
+
+      addResult("✅ File uploaded successfully!");
+      addResult(`   CID: ${result.cid}`);
+      addResult(`   Size: ${result.size} bytes`);
+      addResult(`   Name: ${result.name}`);
 
       addResult('🔄 Verifying uploaded CID...')
       const verification = await verifyCIDAvailability(result.cid)
       addResult(`   Verification: ${verification.isAvailable ? '✅ Available' : '❌ Not yet available'}`)
       
     } catch (error) {
-      addResult(`❌ File upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `❌ File upload failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
 
   const testInvalidCID = async () => {
     try {
-      addResult('🔄 Testing invalid CID handling...')
-      await verifyCIDAvailability('invalid-cid-123')
-      addResult('❌ Should have thrown error for invalid CID')
+      addResult("🔄 Testing invalid CID handling...");
+      await verifyCIDAvailability("invalid-cid-123");
+      addResult("❌ Should have thrown error for invalid CID");
     } catch (error) {
-      addResult(`✅ Correctly rejected invalid CID: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `✅ Correctly rejected invalid CID: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
 
   const testContractConnection = async () => {
     try {
-      addResult('🔄 Testing contract connection...')
-      
+      addResult("🔄 Testing contract connection...");
+
       if (!isConnected) {
-        addResult('❌ Wallet not connected')
-        return
+        addResult("❌ Wallet not connected");
+        return;
       }
-      
-      addResult(`📍 Connected to: ${chain?.name || 'Unknown chain'}`)
-      addResult(`💰 Wallet: ${address}`)
-      addResult(`📜 Contract: ${contractAddress || 'Not available'}`)
-      addResult(`✅ Contract Available: ${isContractAvailable ? 'Yes' : 'No (using mock)'}`)
-      
+
+      addResult(`📍 Connected to: ${chain?.name || "Unknown chain"}`);
+      addResult(`💰 Wallet: ${address}`);
+      addResult(`📜 Contract: ${contractAddress || "Not available"}`);
+      addResult(
+        `✅ Contract Available: ${isContractAvailable ? "Yes" : "No (using mock)"}`
+      );
+
       if (pricePerSecond) {
-        addResult(`💰 Price per second: ${pricePerSecond.toString()} wei`)
+        addResult(`💰 Price per second: ${pricePerSecond.toString()} wei`);
       } else {
-        addResult('💰 Price per second: Using fallback (0.001 ETH/sec)')
+        addResult("💰 Price per second: Using fallback (0.001 ETH/sec)");
       }
       
       const cost = calculateCost(testDuration)
       addResult(`💵 Cost for ${testDuration}s: ${cost.toString()} wei (${(Number(cost) / 1e18).toFixed(6)} ETH)`)
       
     } catch (error) {
-      addResult(`❌ Contract connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `❌ Contract connection test failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
 
   const testCreateCheckpoint = async () => {
     try {
-      addResult('🔄 Testing checkpoint creation...')
-      
+      addResult("🔄 Testing checkpoint creation...");
+
       if (!isConnected) {
-        addResult('❌ Wallet not connected')
-        return
+        addResult("❌ Wallet not connected");
+        return;
       }
-      
+
       if (!testCID) {
-        addResult('❌ Please enter a CID to test with')
-        return
+        addResult("❌ Please enter a CID to test with");
+        return;
       }
-      
+
       const params = {
         cid: testCID,
         tag: testTag,
         duration: testDuration,
-        publishToWormhole: true
-      }
-      
-      addResult(`📋 Checkpoint params:`)
-      addResult(`   CID: ${params.cid}`)
-      addResult(`   Tag: ${params.tag}`)
-      addResult(`   Duration: ${params.duration}s (${Math.round(params.duration/3600)}h)`)
-      addResult(`   Wormhole: ${params.publishToWormhole ? 'Yes' : 'No'}`)
-      
-      const cost = calculateCost(params.duration)
-      addResult(`   Cost: ${(Number(cost) / 1e18).toFixed(6)} ETH`)
-      
+        publishToWormhole: true,
+      };
+
+      addResult(`📋 Checkpoint params:`);
+      addResult(`   CID: ${params.cid}`);
+      addResult(`   Tag: ${params.tag}`);
+      addResult(
+        `   Duration: ${params.duration}s (${Math.round(params.duration / 3600)}h)`
+      );
+      addResult(`   Wormhole: ${params.publishToWormhole ? "Yes" : "No"}`);
+
+      const cost = calculateCost(params.duration);
+      addResult(`   Cost: ${(Number(cost) / 1e18).toFixed(6)} ETH`);
+
       if (!isContractAvailable) {
-        addResult('⚠️ Using mock contract - would call createCheckpoint() with above params')
-        addResult('✅ Mock checkpoint creation test passed!')
-        return
+        addResult(
+          "⚠️ Using mock contract - would call createCheckpoint() with above params"
+        );
+        addResult("✅ Mock checkpoint creation test passed!");
+        return;
       }
       
       await createCheckpoint(params)
       addResult('🔄 Transaction submitted! Waiting for confirmation...')
       
     } catch (error) {
-      addResult(`❌ Checkpoint creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `❌ Checkpoint creation failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
 
   const testEndToEndFlow = async () => {
     try {
       addResult('🔄 Testing complete end-to-end flow...')
       
       if (!testFile) {
-        addResult('❌ Please select a file for end-to-end test')
-        return
+        addResult("❌ Please select a file for end-to-end test");
+        return;
       }
-      
+
       if (!client) {
-        addResult('❌ Storacha client not initialized')
-        return
+        addResult("❌ Storacha client not initialized");
+        return;
       }
-      
+
       if (!isConnected) {
-        addResult('❌ Wallet not connected')
-        return
+        addResult("❌ Wallet not connected");
+        return;
       }
       
       addResult('📤 Step 1: Uploading to Storacha...')
@@ -232,29 +301,32 @@ export default function TestPage() {
         cid: uploadResult.cid,
         tag: `file-${Date.now()}`,
         duration: testDuration,
-        publishToWormhole: true
-      }
-      
+        publishToWormhole: true,
+      };
+
       if (!isContractAvailable) {
-        addResult('⚠️ Mock contract - would create checkpoint here')
-        addResult('✅ End-to-end flow test completed!')
+        addResult("⚠️ Mock contract - would create checkpoint here");
+        addResult("✅ End-to-end flow test completed!");
       } else {
-        await createCheckpoint(checkpointParams)
-        addResult('✅ End-to-end flow initiated! Check wallet for transaction.')
+        await createCheckpoint(checkpointParams);
+        addResult(
+          "✅ End-to-end flow initiated! Check wallet for transaction."
+        );
       }
-      
     } catch (error) {
-      addResult(`❌ End-to-end flow failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addResult(
+        `❌ End-to-end flow failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
     }
-  }
+  };
 
   const clearResults = () => {
-    setTestResults([])
-    clearStorachaError()
-    clearCIDError() 
-    clearContractError()
-    resetContract()
-  }
+    setTestResults([]);
+    clearStorachaError();
+    clearCIDError();
+    clearContractError();
+    resetContract();
+  };
 
   return (
     <div className="min-h-screen">
@@ -281,7 +353,7 @@ export default function TestPage() {
             >
               Test Storacha Init
             </button>
-            
+
             <button
               onClick={testCIDVerification}
               disabled={isVerifying}
@@ -289,7 +361,7 @@ export default function TestPage() {
             >
               Test CID Verification
             </button>
-            
+
             <button
               onClick={testContractConnection}
               disabled={!isConnected}
@@ -297,7 +369,7 @@ export default function TestPage() {
             >
               Test Contract
             </button>
-            
+
             <button
               onClick={testInvalidCID}
               disabled={isVerifying}
@@ -305,15 +377,15 @@ export default function TestPage() {
             >
               Test Invalid CID
             </button>
-            
+
             <button
               onClick={testCreateCheckpoint}
               disabled={!isConnected || isCreating}
               className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 border-2 border-card-border transition-colors"
             >
-              {isCreating ? 'Creating...' : 'Create Checkpoint'}
+              {isCreating ? "Creating..." : "Create Checkpoint"}
             </button>
-            
+
             <button
               onClick={clearResults}
               className="px-4 py-2 bg-foreground text-background rounded hover:bg-accent border-2 border-card-border transition-colors"
@@ -335,7 +407,7 @@ export default function TestPage() {
                 disabled={!testFile || isUploading || !client}
                 className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 whitespace-nowrap border-2 border-card-border transition-colors"
               >
-                {isUploading ? 'Uploading...' : 'Test Upload'}
+                {isUploading ? "Uploading..." : "Test Upload"}
               </button>
             </div>
           </div>
@@ -378,7 +450,9 @@ export default function TestPage() {
                 disabled={!testFile || !client || !isConnected || isUploading || isCreating}
                 className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 whitespace-nowrap border-2 border-card-border transition-colors"
               >
-                {isUploading || isCreating ? 'Processing...' : '🚀 Full E2E Test'}
+                {isUploading || isCreating
+                  ? "Processing..."
+                  : "🚀 Full E2E Test"}
               </button>
               <div className="text-sm text-foreground-muted flex items-center">
                 Upload → Verify → Checkpoint
@@ -467,5 +541,5 @@ export default function TestPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }
