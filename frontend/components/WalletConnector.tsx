@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { isSupportedChain, supportedChains } from '@/lib/chains'
 import { ChevronDownIcon, WalletIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
@@ -8,6 +9,8 @@ import { Menu, Transition } from '@headlessui/react'
 import { Fragment } from 'react'
 
 export function WalletConnector() {
+  const router = useRouter()
+  const pathname = usePathname()
   const { address, isConnected, chain } = useAccount()
   const { connect, connectors, isPending } = useConnect()
   const { disconnect } = useDisconnect()
@@ -61,6 +64,30 @@ export function WalletConnector() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Navigation */}
+      <div className="flex gap-3 pb-4 border-b-2 border-black">
+        <button
+          onClick={() => router.push('/dashboard')}
+          className={`px-4 py-2 rounded border-2 border-black font-semibold ${
+            pathname === '/dashboard'
+              ? 'bg-red-600 text-white'
+              : 'bg-white text-black hover:bg-red-50'
+          }`}
+        >
+          Dashboard
+        </button>
+        <button
+          onClick={() => router.push('/test')}
+          className={`px-4 py-2 rounded border-2 border-black font-semibold ${
+            pathname === '/test'
+              ? 'bg-red-600 text-white'
+              : 'bg-white text-black hover:bg-red-50'
+          }`}
+        >
+          Testing Tools
+        </button>
+      </div>
+
       {/* Wallet Status */}
       <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
         <div className="flex items-center gap-3">
