@@ -64,6 +64,90 @@ describe("Publisher-Receiver Integration", function () {
     };
   }
 
+  const BASE_CHAIN = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE;
+  const AVALANCHE_CHAIN = CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE;
+  const ETHEREUM_CHAIN = CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE;
+  const DEFAULT_DURATION = 86400;
+
+  function toWormholeAddress(address: string) {
+    return ethers.zeroPadValue(address, 32);
+  }
+
+  async function deployReceiverWithEmitters(
+    targetChainId: number,
+    owner: any,
+    emitters: Array<{ chainId: number; emitterAddress: string }>
+  ) {
+    const MockWormholeCore =
+      await ethers.getContractFactory("MockWormholeCore");
+    const targetWormhole = await MockWormholeCore.deploy();
+    await targetWormhole.setChainId(targetChainId);
+
+    const WormholeReceiver =
+      await ethers.getContractFactory("WormholeReceiver");
+    const receiver = await WormholeReceiver.deploy(
+      await targetWormhole.getAddress(),
+      await owner.getAddress()
+    );
+
+    for (const { chainId, emitterAddress } of emitters) {
+      await receiver
+        .connect(owner)
+        .addTrustedEmitter(chainId, toWormholeAddress(emitterAddress));
+    }
+
+    return { receiver, targetWormhole };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function findMessagePublishedEvent(receipt: any, mockWormhole: any) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return receipt?.logs?.find((log: any) => {
+      try {
+        const parsed = mockWormhole.interface.parseLog(log);
+        return parsed?.name === "MessagePublished";
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function buildMockVaa(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    targetWormhole: any,
+    publisherAddress: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parsedEvent: any,
+    sourceChainId: number
+  ) {
+    return targetWormhole.createMockVAA(
+      sourceChainId,
+      toWormholeAddress(publisherAddress),
+      parsedEvent.args.sequence,
+      parsedEvent.args.payload
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function parseCheckpointReceivedEvent(receipt: any, receiver: any) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const log = receipt?.logs?.find((entry: any) => {
+      try {
+        const parsed = receiver.interface.parseLog(entry);
+        return parsed?.name === "CheckpointReceived";
+      } catch {
+        return false;
+      }
+    });
+
+    if (!log) {
+      return undefined;
+    }
+
+    return receiver.interface.parseLog(log);
+  }
+
   // ============ INTEGRATION TESTS ============
 
   describe("End-to-End Message Flow", function () {
@@ -312,6 +396,871 @@ describe("Publisher-Receiver Integration", function () {
 
       const isValid = await codecTest.validateMessage(invalidMessage);
       expect(isValid).to.be.false;
+    });
+  });
+
+  describe("WormholeReceiver Integration", function () {
+    it("should relay Base checkpoints to an Avalanche receiver", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeibqavalancheflowbafybeibqavalancheflowbafybeib";
+      const testTag = ethers.encodeBytes32String("base-to-ava");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      expect(messageEvent).to.exist;
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const deliverTx = await receiver.receiveCheckpoint(vaa);
+      const deliverReceipt = await deliverTx.wait();
+
+      const checkpointEvent = parseCheckpointReceivedEvent(
+        deliverReceipt,
+        receiver
+      );
+      expect(checkpointEvent).to.exist;
+      const vaaHash = checkpointEvent!.args.vaaHash;
+
+      const stored = await receiver.getCheckpoint(vaaHash);
+      expect(stored.cid).to.equal(testCid);
+      expect(stored.tag).to.equal(testTag);
+      expect(stored.sourceChainId).to.equal(BASE_CHAIN);
+      expect(await receiver.totalCheckpoints()).to.equal(1n);
+      expect(await receiver.checkpointCountByChain(BASE_CHAIN)).to.equal(1n);
+
+      const byCid = await receiver.getCheckpointByCid(testCid, BASE_CHAIN);
+      expect(byCid.cid).to.equal(testCid);
+
+      const exists = await receiver.checkCidExistsOnChains(testCid, [
+        BASE_CHAIN,
+        AVALANCHE_CHAIN,
+      ]);
+      expect(exists).to.deep.equal([true, false]);
+    });
+
+    it("should relay Base checkpoints to an Ethereum receiver", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        ETHEREUM_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeietherrelaybeaconbafybeietherrelaybeaconxyz";
+      const testTag = ethers.encodeBytes32String("base-to-eth");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      expect(messageEvent).to.exist;
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const deliverTx = await receiver.receiveCheckpoint(vaa);
+      const deliverReceipt = await deliverTx.wait();
+
+      const checkpointEvent = parseCheckpointReceivedEvent(
+        deliverReceipt,
+        receiver
+      );
+      expect(checkpointEvent).to.exist;
+      const vaaHash = checkpointEvent!.args.vaaHash;
+
+      const stored = await receiver.getCheckpoint(vaaHash);
+      expect(stored.cid).to.equal(testCid);
+      expect(stored.sourceChainId).to.equal(BASE_CHAIN);
+      expect(await receiver.totalCheckpoints()).to.equal(1n);
+
+      const byCid = await receiver.getCheckpointByCid(testCid, BASE_CHAIN);
+      expect(byCid.creator).to.equal(user.address);
+    });
+  });
+
+  describe("Multi-chain Receiver Scenarios", function () {
+    it("should allow the same CID on multiple source chains", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+          {
+            chainId: AVALANCHE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const sharedCid =
+        "bafybeimultichaincidexamplebafybeimultichaincidexample";
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+      const tagBase = ethers.encodeBytes32String("cid-base");
+      const tagAvalanche = ethers.encodeBytes32String("cid-ava");
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(sharedCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      // Publish from Base
+      await publisher.setTestChainId(BASE_CHAIN);
+      const txBase = await publisher
+        .connect(user)
+        .createCheckpoint(sharedCid, duration, "0x", tagBase, true, {
+          value: totalCost,
+        });
+      const receiptBase = await txBase.wait();
+      const eventBase = findMessagePublishedEvent(receiptBase, mockWormhole);
+      const parsedBase = mockWormhole.interface.parseLog(eventBase!);
+      const vaaBase = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedBase,
+        BASE_CHAIN
+      );
+      await receiver.receiveCheckpoint(vaaBase);
+
+      // Publish from Avalanche (different source chain, same CID)
+      await publisher.setTestChainId(AVALANCHE_CHAIN);
+      const txAvalanche = await publisher
+        .connect(user)
+        .createCheckpoint(sharedCid, duration, "0x", tagAvalanche, true, {
+          value: totalCost,
+        });
+      const receiptAvalanche = await txAvalanche.wait();
+      const eventAvalanche = findMessagePublishedEvent(
+        receiptAvalanche,
+        mockWormhole
+      );
+      const parsedAvalanche = mockWormhole.interface.parseLog(eventAvalanche!);
+      const vaaAvalanche = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedAvalanche,
+        AVALANCHE_CHAIN
+      );
+      await receiver.receiveCheckpoint(vaaAvalanche);
+
+      expect(await receiver.totalCheckpoints()).to.equal(2n);
+      expect(await receiver.checkpointCountByChain(BASE_CHAIN)).to.equal(1n);
+      expect(await receiver.checkpointCountByChain(AVALANCHE_CHAIN)).to.equal(
+        1n
+      );
+
+      const exists = await receiver.checkCidExistsOnChains(sharedCid, [
+        BASE_CHAIN,
+        AVALANCHE_CHAIN,
+        ETHEREUM_CHAIN,
+      ]);
+      expect(exists).to.deep.equal([true, true, false]);
+
+      const baseCheckpoint = await receiver.getCheckpointByCid(
+        sharedCid,
+        BASE_CHAIN
+      );
+      const avalancheCheckpoint = await receiver.getCheckpointByCid(
+        sharedCid,
+        AVALANCHE_CHAIN
+      );
+      expect(baseCheckpoint.tag).to.equal(tagBase);
+      expect(avalancheCheckpoint.tag).to.equal(tagAvalanche);
+    });
+
+    it("should deliver the same VAA to multiple receivers", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver: avalancheReceiver, targetWormhole: avalancheWormhole } =
+        await deployReceiverWithEmitters(AVALANCHE_CHAIN, owner, [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]);
+
+      const { receiver: ethereumReceiver } = await deployReceiverWithEmitters(
+        ETHEREUM_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeibroadcastcidbafybeibroadcastcidbafybeibroadc";
+      const testTag = ethers.encodeBytes32String("broadcast");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        avalancheWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      await avalancheReceiver.receiveCheckpoint(vaa);
+      await ethereumReceiver.receiveCheckpoint(vaa);
+
+      const avalancheStored = await avalancheReceiver.getCheckpointByCid(
+        testCid,
+        BASE_CHAIN
+      );
+      const ethereumStored = await ethereumReceiver.getCheckpointByCid(
+        testCid,
+        BASE_CHAIN
+      );
+
+      expect(avalancheStored.cid).to.equal(testCid);
+      expect(ethereumStored.cid).to.equal(testCid);
+    });
+  });
+
+  describe("Security & Validation Tests", function () {
+    it("should reject replay attack (same VAA submitted twice)", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeireplayattackcidbafybeireplayattackcidexample";
+      const testTag = ethers.encodeBytes32String("replay-test");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      // First submission - should succeed
+      await expect(receiver.receiveCheckpoint(vaa)).to.emit(
+        receiver,
+        "CheckpointReceived"
+      );
+
+      // Second submission - should fail with VAAConsumed error
+      await expect(receiver.receiveCheckpoint(vaa))
+        .to.be.revertedWithCustomError(receiver, "VAAConsumed")
+        .withArgs(
+          await targetWormhole.parseAndVerifyVM(vaa).then((r) => r[0].hash)
+        );
+    });
+
+    it("should reject VAA from untrusted emitter", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      // Deploy receiver WITHOUT adding publisher as trusted emitter
+      const MockWormholeCore =
+        await ethers.getContractFactory("MockWormholeCore");
+      const targetWormhole = await MockWormholeCore.deploy();
+      await targetWormhole.setChainId(AVALANCHE_CHAIN);
+
+      const WormholeReceiver =
+        await ethers.getContractFactory("WormholeReceiver");
+      const receiver = await WormholeReceiver.deploy(
+        await targetWormhole.getAddress(),
+        await owner.getAddress()
+      );
+
+      const testCid = "bafybeiuntrustedcidbafybeiuntrustedcidexampledata";
+      const testTag = ethers.encodeBytes32String("untrusted");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      // Should fail with UntrustedEmitter error
+      await expect(receiver.receiveCheckpoint(vaa))
+        .to.be.revertedWithCustomError(receiver, "UntrustedEmitter")
+        .withArgs(BASE_CHAIN, toWormholeAddress(await publisher.getAddress()));
+    });
+
+    it("should reject duplicate CID on same source chain", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const sharedCid = "bafybeiduplicatecidbafybeiduplicatecidexampledata";
+      const testTag1 = ethers.encodeBytes32String("first");
+      const testTag2 = ethers.encodeBytes32String("second");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(sharedCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      // First checkpoint - should succeed
+      const tx1 = await publisher
+        .connect(user)
+        .createCheckpoint(sharedCid, duration, "0x", testTag1, true, {
+          value: totalCost,
+        });
+      const receipt1 = await tx1.wait();
+      const event1 = findMessagePublishedEvent(receipt1, mockWormhole);
+      const parsed1 = mockWormhole.interface.parseLog(event1!);
+      const vaa1 = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsed1,
+        BASE_CHAIN
+      );
+      await receiver.receiveCheckpoint(vaa1);
+
+      // Second checkpoint with SAME CID on SAME chain - should fail
+      const tx2 = await publisher
+        .connect(user)
+        .createCheckpoint(sharedCid, duration, "0x", testTag2, true, {
+          value: totalCost,
+        });
+      const receipt2 = await tx2.wait();
+      const event2 = findMessagePublishedEvent(receipt2, mockWormhole);
+      const parsed2 = mockWormhole.interface.parseLog(event2!);
+      const vaa2 = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsed2,
+        BASE_CHAIN
+      );
+
+      await expect(receiver.receiveCheckpoint(vaa2))
+        .to.be.revertedWithCustomError(receiver, "CIDAlreadyExistsOnChain")
+        .withArgs(cidHash, BASE_CHAIN);
+    });
+
+    it("should fully validate CheckpointReceived event arguments", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeieventvalidationcidbafybeieventvalidationcid";
+      const testTag = ethers.encodeBytes32String("event-test");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const deliverTx = await receiver.receiveCheckpoint(vaa);
+      const deliverReceipt = await deliverTx.wait();
+
+      const checkpointEvent = parseCheckpointReceivedEvent(
+        deliverReceipt,
+        receiver
+      );
+      expect(checkpointEvent).to.exist;
+
+      // Validate ALL event arguments
+      const args = checkpointEvent!.args;
+      expect(args.vaaHash).to.exist;
+      expect(args.cidHash).to.equal(cidHash);
+      expect(args.tag).to.equal(testTag);
+      expect(args.sourceChainId).to.equal(BASE_CHAIN);
+      expect(args.creator).to.equal(user.address);
+      expect(args.cid).to.equal(testCid);
+      expect(args.expiresAt).to.be.gt(0);
+      expect(args.receivedAt).to.be.gt(0);
+    });
+
+    it("should verify cidHashToVaaHash mapping correctness", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeimappingtestcidbafybeimappingtestcidexample";
+      const testTag = ethers.encodeBytes32String("mapping");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const deliverTx = await receiver.receiveCheckpoint(vaa);
+      const deliverReceipt = await deliverTx.wait();
+      const checkpointEvent = parseCheckpointReceivedEvent(
+        deliverReceipt,
+        receiver
+      );
+      const vaaHash = checkpointEvent!.args.vaaHash;
+
+      // Verify cidHashToVaaHash mapping
+      const mappedVaaHash = await receiver.getVaaHashByCid(testCid, BASE_CHAIN);
+      expect(mappedVaaHash).to.equal(vaaHash);
+      expect(mappedVaaHash).to.not.equal(ethers.ZeroHash);
+
+      // Verify getUniqueKey helper produces correct key
+      const uniqueKey = await receiver.getUniqueKey(cidHash, BASE_CHAIN);
+      expect(uniqueKey).to.equal(
+        ethers.keccak256(
+          ethers.solidityPacked(["bytes32", "uint16"], [cidHash, BASE_CHAIN])
+        )
+      );
+    });
+  });
+
+  describe("Query Function Edge Cases", function () {
+    it("should revert when querying non-existent checkpoint", async function () {
+      const { owner } = await deployIntegrationFixture();
+
+      const { receiver } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        []
+      );
+
+      const fakeVaaHash = ethers.keccak256(ethers.toUtf8Bytes("fake"));
+
+      await expect(receiver.getCheckpoint(fakeVaaHash))
+        .to.be.revertedWithCustomError(receiver, "CheckpointNotFound")
+        .withArgs(fakeVaaHash);
+    });
+
+    it("should revert when querying CID that doesn't exist", async function () {
+      const { owner } = await deployIntegrationFixture();
+
+      const { receiver } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        []
+      );
+
+      const fakeCid = "bafybeinonexistentcidbafybeinonexistentcidexample";
+
+      await expect(
+        receiver.getCheckpointByCid(fakeCid, BASE_CHAIN)
+      ).to.be.revertedWithCustomError(receiver, "CheckpointNotFound");
+    });
+
+    it("should return false for non-existent checkpoint validity check", async function () {
+      const { owner } = await deployIntegrationFixture();
+
+      const { receiver } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        []
+      );
+
+      const fakeVaaHash = ethers.keccak256(ethers.toUtf8Bytes("fake"));
+      const isValid = await receiver.isCheckpointValid(fakeVaaHash);
+
+      expect(isValid).to.be.false;
+    });
+
+    it("should return zero hash for non-existent CID lookup", async function () {
+      const { owner } = await deployIntegrationFixture();
+
+      const { receiver } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        []
+      );
+
+      const fakeCid = "bafybeinonexistentcidbafybeinonexistentcidexample";
+      const vaaHash = await receiver.getVaaHashByCid(fakeCid, BASE_CHAIN);
+
+      expect(vaaHash).to.equal(ethers.ZeroHash);
+    });
+
+    it("should handle getCheckpointByCidAnyChain with no matches", async function () {
+      const { owner } = await deployIntegrationFixture();
+
+      const { receiver } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        []
+      );
+
+      const fakeCid = "bafybeinonexistentcidbafybeinonexistentcidexample";
+
+      await expect(
+        receiver.getCheckpointByCidAnyChain(fakeCid, [
+          BASE_CHAIN,
+          AVALANCHE_CHAIN,
+          ETHEREUM_CHAIN,
+        ])
+      ).to.be.revertedWithCustomError(receiver, "CheckpointNotFound");
+    });
+
+    it("should return all false for checkCidExistsOnChains with no matches", async function () {
+      const { owner } = await deployIntegrationFixture();
+
+      const { receiver } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        []
+      );
+
+      const fakeCid = "bafybeinonexistentcidbafybeinonexistentcidexample";
+      const exists = await receiver.checkCidExistsOnChains(fakeCid, [
+        BASE_CHAIN,
+        AVALANCHE_CHAIN,
+        ETHEREUM_CHAIN,
+      ]);
+
+      expect(exists).to.deep.equal([false, false, false]);
+    });
+  });
+
+  describe("WormholeReceiver Failure Scenarios", function () {
+    it("should accept delayed delivery that is still before expiry", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeidelayedcidbafybeidelayedcidexampledata";
+      const testTag = ethers.encodeBytes32String("delayed-valid");
+      const duration = DEFAULT_DURATION;
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const snapshotId = await ethers.provider.send("evm_snapshot", []);
+      await ethers.provider.send("evm_increaseTime", [3600]); // +1 hour
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(receiver.receiveCheckpoint(vaa)).to.emit(
+        receiver,
+        "CheckpointReceived"
+      );
+
+      await ethers.provider.send("evm_revert", [snapshotId]);
+    });
+
+    it("should reject delivery if checkpoint expired in transit", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeiexpiredincidbafybeiexpiredincidxy";
+      const testTag = ethers.encodeBytes32String("expired");
+      const duration = 60; // 1 minute expiry
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const snapshotId = await ethers.provider.send("evm_snapshot", []);
+      await ethers.provider.send("evm_increaseTime", [180]); // wait 3 minutes
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        receiver.receiveCheckpoint(vaa)
+      ).to.be.revertedWithCustomError(receiver, "InvalidExpiration");
+
+      await ethers.provider.send("evm_revert", [snapshotId]);
+    });
+
+    it("should reject messages that are older than the allowed age", async function () {
+      const { publisher, mockVerifier, mockWormhole, owner, user } =
+        await deployIntegrationFixture();
+
+      const { receiver, targetWormhole } = await deployReceiverWithEmitters(
+        AVALANCHE_CHAIN,
+        owner,
+        [
+          {
+            chainId: BASE_CHAIN,
+            emitterAddress: await publisher.getAddress(),
+          },
+        ]
+      );
+
+      const testCid = "bafybeitoooldcidbafybeitoooldcidbafybeitoooldcid123";
+      const testTag = ethers.encodeBytes32String("too-old");
+      const duration = DEFAULT_DURATION * 20; // keep expiry far in future
+      const cost = await publisher.pricePerSecondWei();
+      const checkpointCost = cost * BigInt(duration);
+      const wormholeFee = await mockWormhole.messageFee();
+      const totalCost = checkpointCost + wormholeFee;
+
+      const cidHash = ethers.keccak256(ethers.toUtf8Bytes(testCid));
+      await mockVerifier.setMockAvailable(cidHash, true);
+
+      const tx = await publisher
+        .connect(user)
+        .createCheckpoint(testCid, duration, "0x", testTag, true, {
+          value: totalCost,
+        });
+      const receipt = await tx.wait();
+      const messageEvent = findMessagePublishedEvent(receipt, mockWormhole);
+      const parsedEvent = mockWormhole.interface.parseLog(messageEvent!);
+
+      const vaa = await buildMockVaa(
+        targetWormhole,
+        await publisher.getAddress(),
+        parsedEvent,
+        BASE_CHAIN
+      );
+
+      const snapshotId = await ethers.provider.send("evm_snapshot", []);
+      await ethers.provider.send("evm_increaseTime", [8 * 24 * 60 * 60]); // +8 days
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        receiver.receiveCheckpoint(vaa)
+      ).to.be.revertedWithCustomError(receiver, "MessageTooOld");
+
+      await ethers.provider.send("evm_revert", [snapshotId]);
     });
   });
 

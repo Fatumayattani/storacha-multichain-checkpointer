@@ -33,7 +33,7 @@ describe("Wormhole Configuration", function () {
       ).to.equal("0x7bbcE28e64B3F8b84d876Ab298393c38ad7aac4C");
       expect(
         WORMHOLE_CORE_ADDRESSES[CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE]
-      ).to.equal("0x4a8bc80Ed5a4067f1FFf25799C844145DDF9e5e5");
+      ).to.equal("0x4a8bc80Ed5a4067f1CCf107057b8270E0cC11A78");
     });
   });
 
@@ -66,7 +66,7 @@ describe("Wormhole Configuration", function () {
       const address = getWormholeCoreAddress(
         CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE
       );
-      expect(address).to.equal("0x4a8bc80Ed5a4067f1FFf25799C844145DDF9e5e5");
+      expect(address).to.equal("0x4a8bc80Ed5a4067f1CCf107057b8270E0cC11A78");
     });
 
     it("should throw for unsupported chain", function () {
