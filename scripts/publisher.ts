@@ -1,4 +1,10 @@
-import { ethers } from "ethers";
+import {
+  JsonRpcProvider,
+  Wallet,
+  Contract,
+  AbiCoder,
+  encodeBytes32String,
+} from "ethers";
 import dotenv from "dotenv";
 import {
   getWormholeCoreAddress,
@@ -11,26 +17,30 @@ import {
 } from "@certusone/wormhole-sdk";
 
 dotenv.config();
-console.log("RPC_URL loaded:", process.env.RPC_URL?.slice(0, 20) + "..."); // only first part for safety
+
+// quick env sanity checks (safe to log)
+console.log("RPC_URL loaded:", process.env.RPC_URL?.slice(0, 40) + "...");
 console.log("PRIVATE_KEY loaded:", !!process.env.PRIVATE_KEY);
 
 const RPC_URL = process.env.RPC_URL!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 
-// ✅ Use Wormhole chain ID constant (not EVM ID)
+// Wormhole chain ID (use the wormhole constant, not EVM chain id)
 const SOURCE_CHAIN_ID = CHAIN_IDS.BASE_SEPOLIA_WORMHOLE;
 const WORMHOLE_CORE = getWormholeCoreAddress(SOURCE_CHAIN_ID);
 
-const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+// ethers v6 provider and signer
+const provider = new JsonRpcProvider(RPC_URL);
+const signer = new Wallet(PRIVATE_KEY, provider);
 
-// ABI for Wormhole Core
+// Wormhole core contract ABI (only the fn we need)
 const coreAbi = [
   "function publishMessage(uint32 nonce, bytes payload, uint8 consistencyLevel) payable returns (uint64)",
 ];
 
 /**
- * Encodes a checkpoint message to match CheckpointCodec
+ * Encodes a checkpoint message to match the CheckpointCodec used by the Receiver.
+ * Types must match the decoding side exactly.
  */
 function encodeCheckpoint(
   cid: string,
@@ -40,7 +50,7 @@ function encodeCheckpoint(
   timestamp: number,
   sourceChainId: number
 ): string {
-  const abiCoder = ethers.utils.defaultAbiCoder;
+  const abiCoder = new AbiCoder();
   return abiCoder.encode(
     ["uint8", "string", "bytes32", "uint256", "address", "uint256", "uint16"],
     [1, cid, tag, expiresAt, creator, timestamp, sourceChainId]
@@ -48,7 +58,7 @@ function encodeCheckpoint(
 }
 
 /**
- * Publishes a Wormhole message containing checkpoint data
+ * Publishes a Wormhole message containing checkpoint data.
  */
 export async function publishCheckpoint(
   cid: string,
@@ -57,6 +67,7 @@ export async function publishCheckpoint(
 ) {
   const creator = await signer.getAddress();
   const timestamp = Math.floor(Date.now() / 1000);
+
   const payload = encodeCheckpoint(
     cid,
     tag,
@@ -71,7 +82,7 @@ export async function publishCheckpoint(
   console.log("Core address:", WORMHOLE_CORE);
   console.log("Payload (encoded):", payload);
 
-  const coreContract = new ethers.Contract(WORMHOLE_CORE, coreAbi, signer);
+  const coreContract = new Contract(WORMHOLE_CORE, coreAbi, signer);
 
   const tx = await coreContract.publishMessage(
     0, // nonce
@@ -91,11 +102,14 @@ export async function publishCheckpoint(
   return { emitter, sequence };
 }
 
-// Run with: npx ts-node scripts/publisher.ts
+/**
+ * Run script (always executed when file is run directly)
+ * Adjust cid/tag/expiresAt as needed.
+ */
 (async () => {
   try {
     const cid = "bafyExampleCid123";
-    const tag = ethers.utils.formatBytes32String("file1");
+    const tag = encodeBytes32String("file1"); // ethers v6 helper
     const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 
     const result = await publishCheckpoint(cid, tag, expiresAt);
