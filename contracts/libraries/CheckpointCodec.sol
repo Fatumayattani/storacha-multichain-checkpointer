@@ -280,7 +280,8 @@ library CheckpointCodec {
             message.expiresAt,
             message.creator,
             message.timestamp,
-            message.sourceChainId
+            message.sourceChainId,
+            message.revoked
         ));
     }
     
