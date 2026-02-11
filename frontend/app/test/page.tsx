@@ -14,6 +14,10 @@ export default function TestPage() {
   const [testCID, setTestCID] = useState<string>('')
   const [testTag, setTestTag] = useState<string>('test-checkpoint')
   const [testDuration, setTestDuration] = useState<number>(3600) // 1 hour
+  const [revokeId, setRevokeId] = useState<string>('')
+  const [propagateRevocation, setPropagateRevocation] = useState<boolean>(true)
+  const [storachaEmail, setStorachaEmail] = useState<string>('')
+  const [delegationProof, setDelegationProof] = useState<string>('')
   
   const { isConnected, address, chain } = useAccount()
   
@@ -24,6 +28,7 @@ export default function TestPage() {
     error: storachaError, 
     initializeClient, 
     uploadFile,
+    addExistingSpace,
     clearError: clearStorachaError,
   } = useStoracha();
 
@@ -32,11 +37,10 @@ export default function TestPage() {
     isContractAvailable,
     pricePerSecond,
     createCheckpoint,
-    hash,
+    revokeCheckpoint,
     isCreating,
     isConfirming,
     isSuccess,
-    isError: isContractError,
     error: contractError,
     calculateCost,
     reset: resetContract,
@@ -248,7 +252,7 @@ export default function TestPage() {
       );
       addResult(`   Wormhole: ${params.publishToWormhole ? "Yes" : "No"}`);
 
-      const cost = calculateCost(params.duration);
+      const cost = calculateCost(params.duration, params.publishToWormhole);
       addResult(`   Cost: ${(Number(cost) / 1e18).toFixed(6)} ETH`);
 
       if (!isContractAvailable) {
@@ -265,6 +269,42 @@ export default function TestPage() {
     } catch (error) {
       addResult(
         `❌ Checkpoint creation failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+    }
+  };
+
+  const testRevokeCheckpoint = async () => {
+    try {
+      addResult("🔄 Testing checkpoint revocation...");
+
+      if (!isConnected) {
+        addResult("❌ Wallet not connected");
+        return;
+      }
+
+      if (!revokeId) {
+        addResult("❌ Please enter a Checkpoint ID to revoke");
+        return;
+      }
+
+      const id = BigInt(revokeId);
+      addResult(`📋 Revocation params:`);
+      addResult(`   ID: ${id.toString()}`);
+      addResult(`   Propagate: ${propagateRevocation ? "Yes" : "No"}`);
+
+      if (!isContractAvailable) {
+        addResult(
+          "⚠️ Using mock contract - would call revokeCheckpoint() with above params"
+        );
+        addResult("✅ Mock checkpoint revocation test passed!");
+        return;
+      }
+
+      await revokeCheckpoint(id, propagateRevocation);
+      addResult('🔄 Revocation transaction submitted! Waiting for confirmation...');
+    } catch (error) {
+      addResult(
+        `❌ Checkpoint revocation failed: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     }
   };
@@ -343,17 +383,50 @@ export default function TestPage() {
         </div>
 
         <div className="bg-card-bg border-2 border-card-border rounded-lg p-6 mb-6 shadow-lg">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">2. Test Controls</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <h2 className="text-xl font-semibold mb-4 text-foreground">2. Storacha Configuration</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Storacha Email (Optional)</label>
+              <input
+                type="email"
+                value={storachaEmail}
+                onChange={(e) => setStorachaEmail(e.target.value)}
+                placeholder="email@example.com"
+                className="w-full px-3 py-2 border-2 border-card-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-input-bg text-foreground"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Delegation Proof (JSON)</label>
+              <textarea
+                value={delegationProof}
+                onChange={(e) => setDelegationProof(e.target.value)}
+                placeholder='Paste delegation proof JSON here...'
+                className="w-full px-3 py-2 border-2 border-card-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-input-bg text-foreground h-11 resize-none"
+              />
+            </div>
+          </div>
+          <div className="flex gap-4">
             <button
               onClick={testStorachaInit}
               disabled={isUploading}
               className="px-4 py-2 bg-foreground text-background rounded hover:bg-accent disabled:opacity-50 border-2 border-card-border transition-colors"
             >
-              Test Storacha Init
+              Init Storacha Client
             </button>
+            <button
+              onClick={testImportSpace}
+              disabled={!delegationProof || !client}
+              className="px-4 py-2 bg-foreground text-background rounded hover:bg-accent disabled:opacity-50 border-2 border-card-border transition-colors"
+            >
+              Import Space
+            </button>
+          </div>
+        </div>
 
+        <div className="bg-card-bg border-2 border-card-border rounded-lg p-6 mb-6 shadow-lg">
+          <h2 className="text-xl font-semibold mb-4 text-foreground">3. Test Controls</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <button
               onClick={testCIDVerification}
               disabled={isVerifying}
@@ -384,6 +457,14 @@ export default function TestPage() {
               className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 border-2 border-card-border transition-colors"
             >
               {isCreating ? "Creating..." : "Create Checkpoint"}
+            </button>
+
+            <button
+              onClick={testRevokeCheckpoint}
+              disabled={!isConnected || isCreating}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 border-2 border-card-border transition-colors"
+            >
+              {isCreating ? "Revoking..." : "Revoke Checkpoint"}
             </button>
 
             <button
@@ -442,6 +523,29 @@ export default function TestPage() {
                   onChange={(e) => setTestDuration(Number(e.target.value))}
                   className="w-full px-3 py-2 border-2 border-card-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-input-bg text-foreground"
                 />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 pt-4 border-t-2 border-card-border">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Revoke Checkpoint ID</label>
+                <input
+                  type="text"
+                  value={revokeId}
+                  onChange={(e) => setRevokeId(e.target.value)}
+                  placeholder="ID to revoke..."
+                  className="w-full px-3 py-2 border-2 border-card-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-input-bg text-foreground"
+                />
+              </div>
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={propagateRevocation}
+                    onChange={(e) => setPropagateRevocation(e.target.checked)}
+                    className="w-4 h-4 rounded border-card-border text-accent focus:ring-accent"
+                  />
+                  Propagate via Wormhole
+                </label>
               </div>
             </div>
             <div className="flex gap-4">

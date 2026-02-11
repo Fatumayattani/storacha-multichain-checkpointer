@@ -11,7 +11,6 @@ import {
   getContractABI,
   ContractType,
   CHAIN_IDS,
-  isContractDeployed,
   type SupportedChainId,
 } from "../lib/contracts";
 
@@ -30,6 +29,7 @@ export interface Checkpoint {
   expiresAt: bigint;
   timestamp: bigint;
   verified: boolean;
+  revoked: boolean;
 }
 
 export function useStorachaCheckpointer() {
@@ -38,9 +38,10 @@ export function useStorachaCheckpointer() {
   const [error, setError] = useState<string | null>(null);
 
   // Determine contract type based on chain
-  const contractType = chain?.id === CHAIN_IDS.BASE_SEPOLIA
-    ? ContractType.PUBLISHER
-    : ContractType.RECEIVER;
+  const contractType =
+    chain?.id === CHAIN_IDS.BASE_SEPOLIA
+      ? ContractType.PUBLISHER
+      : ContractType.RECEIVER;
 
   // Get contract address for current chain
   const contractAddress = chain?.id
@@ -69,16 +70,43 @@ export function useStorachaCheckpointer() {
     },
   });
 
+  const { data: wormholeFee } = useReadContract({
+    address: contractAddress as `0x${string}`,
+    abi: getContractABI(),
+    functionName: "getWormholeFee",
+    query: {
+      enabled: !!contractAddress && chain?.id !== undefined,
+    },
+  });
+
+  const { data: nextCheckpointId, refetch: refetchNextCheckpointId } =
+    useReadContract({
+      address: contractAddress as `0x${string}`,
+      abi: getContractABI(),
+      functionName: "nextCheckpointId",
+      query: {
+        enabled: !!contractAddress && chain?.id !== undefined,
+      },
+    });
+
   // Calculate checkpoint cost
   const calculateCost = useCallback(
-    (duration: number): bigint => {
+    (duration: number, publishToWormhole: boolean = false): bigint => {
+      let cost = BigInt(0);
       if (pricePerSecond) {
-        return BigInt(pricePerSecond.toString()) * BigInt(duration);
+        cost = BigInt(pricePerSecond.toString()) * BigInt(duration);
+      } else {
+        // Fallback: 0.001 ETH per second (as per contract default)
+        cost = parseEther("0.001") * BigInt(duration);
       }
-      // Fallback: 0.001 ETH per second (as per contract default)
-      return parseEther("0.001") * BigInt(duration);
+
+      if (publishToWormhole && wormholeFee) {
+        cost += BigInt(wormholeFee.toString());
+      }
+
+      return cost;
     },
-    [pricePerSecond]
+    [pricePerSecond, wormholeFee]
   );
 
   // Create a checkpoint
@@ -105,8 +133,8 @@ export function useStorachaCheckpointer() {
         // Convert tag string to bytes32
         const tagBytes32 = keccak256(encodePacked(["string"], [params.tag]));
 
-        // Calculate cost for the duration
-        const cost = calculateCost(params.duration);
+        // Calculate cost for the duration and wormhole fee
+        const cost = calculateCost(params.duration, params.publishToWormhole);
 
         // Use empty verifier data for MVP (as per contract comment about MockVerifier)
         const verifierData = params.verifierData || "0x";
@@ -147,6 +175,45 @@ export function useStorachaCheckpointer() {
     [chain, contractAddress, address, calculateCost, writeContract]
   );
 
+  const revokeCheckpoint = useCallback(
+    async (id: bigint, publishToWormhole: boolean) => {
+      if (!chain) throw new Error("No chain connected");
+      if (!contractAddress) throw new Error("Contract not deployed");
+      if (!address) throw new Error("Wallet not connected");
+
+      setIsCreating(true);
+      setError(null);
+
+      try {
+        const cost =
+          publishToWormhole && wormholeFee
+            ? BigInt(wormholeFee.toString())
+            : BigInt(0);
+
+        console.log("🔄 Revoking checkpoint:", {
+          id: id.toString(),
+          publishToWormhole,
+          cost: cost.toString(),
+        });
+
+        writeContract({
+          address: contractAddress as `0x${string}`,
+          abi: getContractABI(),
+          functionName: "revokeCheckpoint",
+          args: [id, publishToWormhole],
+          value: cost,
+        });
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to revoke checkpoint";
+        setError(errorMessage);
+        setIsCreating(false);
+        throw new Error(errorMessage);
+      }
+    },
+    [chain, contractAddress, address, wormholeFee, writeContract]
+  );
+
   // Get checkpoint by user and tag
   const getCheckpointByTag = useCallback(
     async (
@@ -184,9 +251,11 @@ export function useStorachaCheckpointer() {
     isContractAvailable: !!contractAddress,
     contractType,
     pricePerSecond,
+    nextCheckpointId: nextCheckpointId as bigint | undefined,
 
     // Transaction state
     createCheckpoint,
+    revokeCheckpoint,
     hash,
     isCreating: isCreating || isPending,
     isConfirming,
@@ -197,6 +266,7 @@ export function useStorachaCheckpointer() {
     // Utilities
     calculateCost,
     getCheckpointByTag,
+    refetchNextCheckpointId,
     reset,
     clearError: () => setError(null),
   };

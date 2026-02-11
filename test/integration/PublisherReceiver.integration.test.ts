@@ -201,7 +201,7 @@ describe("Publisher-Receiver Integration", function () {
       const decoded = await codecTest.decodeMessage(payload);
 
       // Verify decoded message
-      expect(decoded.version).to.equal(1);
+      expect(decoded.version).to.equal(2);
       expect(decoded.cid).to.equal(testCid);
       expect(decoded.tag).to.equal(testTag);
       expect(decoded.creator).to.equal(user.address);
@@ -375,6 +375,7 @@ describe("Publisher-Receiver Integration", function () {
         creator: decoded.creator,
         timestamp: decoded.timestamp,
         sourceChainId: decoded.sourceChainId,
+        revoked: decoded.revoked,
       };
       const isValid = await codecTest.validateMessage(messageObj);
       expect(isValid).to.be.true;
@@ -385,13 +386,14 @@ describe("Publisher-Receiver Integration", function () {
 
       // Create invalid message (empty CID)
       const invalidMessage = {
-        version: 1,
+        version: 2,
         cid: "",
         tag: ethers.encodeBytes32String("invalid"),
         expiresAt: Math.floor(Date.now() / 1000) + 86400,
         creator: ethers.ZeroAddress,
         timestamp: Math.floor(Date.now() / 1000),
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       const isValid = await codecTest.validateMessage(invalidMessage);
@@ -1342,13 +1344,14 @@ describe("Publisher-Receiver Integration", function () {
       for (const chainId of testChains) {
         // Create test message
         const message = {
-          version: 1,
+          version: 2,
           cid: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
           tag: ethers.encodeBytes32String(`chain-${chainId}`),
           expiresAt: Math.floor(Date.now() / 1000) + 86400,
           creator: ethers.Wallet.createRandom().address,
           timestamp: Math.floor(Date.now() / 1000),
           sourceChainId: chainId,
+          revoked: false,
         };
 
         const encoded = await codecTest.encodeMessage(message);
@@ -1562,6 +1565,7 @@ describe("Publisher-Receiver Integration", function () {
         creator: decoded.creator,
         timestamp: decoded.timestamp,
         sourceChainId: decoded.sourceChainId,
+        revoked: decoded.revoked,
       };
       const isValid = await codecTest.validateMessage(messageObj);
       expect(isValid).to.be.true;

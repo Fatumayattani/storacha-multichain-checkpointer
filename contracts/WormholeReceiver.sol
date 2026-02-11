@@ -52,6 +52,7 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
         uint16 sourceChainId;    // Wormhole chain ID (10004, 6, 10002)
         bytes32 emitterAddress;  // Publisher contract address (bytes32)
         uint256 receivedAt;      // When received on THIS chain
+        bool revoked;            // Revocation status
     }
     
     /// @notice Main checkpoint storage (VAA hash => checkpoint)
@@ -363,8 +364,19 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
         bytes32 cidHash = getCidHash(message.cid);
         bytes32 uniqueKey = keccak256(abi.encodePacked(cidHash, sourceChain));
         
-        if (cidHashToVaaHash[uniqueKey] != bytes32(0)) {
-            revert CIDAlreadyExistsOnChain(cidHash, sourceChain);
+        if (message.revoked) {
+            // Handle Revocation: Mark original checkpoint as revoked if it exists
+            bytes32 existingVaaHash = cidHashToVaaHash[uniqueKey];
+            if (existingVaaHash != bytes32(0)) {
+                checkpoints[existingVaaHash].revoked = true;
+            }
+        } else {
+            // Handle Creation: Check if CID already exists on this chain
+            if (cidHashToVaaHash[uniqueKey] != bytes32(0)) {
+                revert CIDAlreadyExistsOnChain(cidHash, sourceChain);
+            }
+            // Update index only for new creations
+            cidHashToVaaHash[uniqueKey] = vaaHash;
         }
         
         // Step 4: Store checkpoint using REAL Wormhole VAA hash
@@ -376,17 +388,17 @@ contract WormholeReceiver is IWormholeReceiver, Ownable, ReentrancyGuard {
             timestamp: message.timestamp,
             sourceChainId: sourceChain,
             emitterAddress: sourceAddress,
-            receivedAt: block.timestamp
+            receivedAt: block.timestamp,
+            revoked: message.revoked
         });
         
-        // Step 5: Update indices (CID + chain -> VAA hash)
-        cidHashToVaaHash[uniqueKey] = vaaHash;
+        // Step 5: Update counters (only for new creations)
+        if (!message.revoked) {
+            checkpointCountByChain[sourceChain]++;
+            totalCheckpoints++;
+        }
         
-        // Step 6: Update counters
-        checkpointCountByChain[sourceChain]++;
-        totalCheckpoints++;
-        
-        // Step 7: Emit event
+        // Step 6: Emit event
         emit CheckpointReceived(
             vaaHash,
             cidHash,
