@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "./IAvailabilityVerifier.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "./libraries/CheckpointCodec.sol";
 
 contract ReentrancyGuard {
     uint256 private locked = 1;
@@ -34,6 +35,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         uint256 expiresAt;
         uint256 timestamp;
         bool verified;
+        bool revoked;
     }
 
     uint256 public nextCheckpointId = 1;
@@ -54,6 +56,8 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         uint256 expiresAt,
         uint256 timestamp
     );
+
+    event CheckpointRevoked(uint256 indexed id, address indexed user);
 
     event CheckpointExtended(uint256 indexed id, uint256 newExpiry);
     event FeesWithdrawn(address to, uint256 amount);
@@ -120,21 +124,24 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
             tag: tag,
             expiresAt: expiresAt,
             timestamp: block.timestamp,
-            verified: ok
+            verified: ok,
+            revoked: false
         });
 
         byCid[cidHash].push(id);
 
         if (publishToWormhole) {
-            bytes memory payload = abi.encode(
-                uint8(1),
-                cid,
-                tag,
-                expiresAt,
-                msg.sender,
-                block.timestamp,
-                _wormholeChainId() // ✅ fixed chain ID
-            );
+            CheckpointCodec.StorachaCheckpointMessage memory message = CheckpointCodec.StorachaCheckpointMessage({
+                version: CheckpointCodec.VERSION,
+                cid: cid,
+                tag: tag,
+                expiresAt: expiresAt,
+                creator: msg.sender,
+                timestamp: block.timestamp,
+                sourceChainId: _wormholeChainId(),
+                revoked: false
+            });
+            bytes memory payload = CheckpointCodec.encode(message);
             wormhole.publishMessage{value: wormholeFee}(0, payload, 1);
         }
 
@@ -160,6 +167,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
     {
         Checkpoint storage cp = checkpoints[id];
         require(cp.user == msg.sender, "not owner");
+        require(!cp.revoked, "already revoked");
         require(addDuration > 0, "bad duration");
 
         uint256 cost = pricePerSecondWei * addDuration;
@@ -172,6 +180,48 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         }
 
         emit CheckpointExtended(id, cp.expiresAt);
+    }
+
+    function revokeCheckpoint(uint256 id, bool publishToWormhole)
+        external
+        payable
+        nonReentrant
+    {
+        Checkpoint storage cp = checkpoints[id];
+        require(cp.user == msg.sender, "not owner");
+        require(!cp.revoked, "already revoked");
+
+        cp.revoked = true;
+
+        if (publishToWormhole) {
+            require(address(wormhole) != address(0), "wormhole not set");
+            uint256 wormholeFee = wormhole.messageFee();
+            require(msg.value >= wormholeFee, "underpay wormhole fee");
+
+            CheckpointCodec.StorachaCheckpointMessage memory message = CheckpointCodec.StorachaCheckpointMessage({
+                version: CheckpointCodec.VERSION,
+                cid: cp.cid,
+                tag: cp.tag,
+                expiresAt: cp.expiresAt,
+                creator: cp.user,
+                timestamp: cp.timestamp,
+                sourceChainId: _wormholeChainId(),
+                revoked: true
+            });
+            bytes memory payload = CheckpointCodec.encode(message);
+            wormhole.publishMessage{value: wormholeFee}(0, payload, 1);
+
+            if (msg.value > wormholeFee) {
+                payable(msg.sender).transfer(msg.value - wormholeFee);
+            }
+        }
+
+        emit CheckpointRevoked(id, msg.sender);
+    }
+
+    function getWormholeFee() public view returns (uint256) {
+        if (address(wormhole) == address(0)) return 0;
+        return wormhole.messageFee();
     }
 
     function withdraw(address payable to, uint256 amount) external onlyRole(ADMIN_ROLE) {

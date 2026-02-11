@@ -13,7 +13,7 @@ library CheckpointCodec {
     // ============ CONSTANTS ============
     
     /// @notice Current protocol version
-    uint8 public constant VERSION = 1;
+    uint8 public constant VERSION = 2;
     
     /// @notice Minimum CID length (IPFS CIDv0: 46 chars minimum)
     uint256 public constant MIN_CID_LENGTH = 40;
@@ -41,13 +41,14 @@ library CheckpointCodec {
      * @dev This structure MUST remain stable for cross-chain compatibility
      */
     struct StorachaCheckpointMessage {
-        uint8 version;           // Protocol version (must be 1)
+        uint8 version;           // Protocol version (must be 1 or 2)
         string cid;              // IPFS CID (40-100 characters)
         bytes32 tag;             // Unique identifier
         uint256 expiresAt;       // Expiration timestamp
         address creator;         // Message creator
         uint256 timestamp;       // Creation timestamp
         uint16 sourceChainId;    // Wormhole chain ID
+        bool revoked;            // Revocation status (v2+)
     }
     
     // ============ ENCODING ============
@@ -70,7 +71,8 @@ library CheckpointCodec {
             message.expiresAt,
             message.creator,
             message.timestamp,
-            message.sourceChainId
+            message.sourceChainId,
+            message.revoked
         );
     }
     
@@ -80,35 +82,70 @@ library CheckpointCodec {
      * @notice Decode bytes to checkpoint message
      * @param payload The encoded message bytes
      * @return Decoded message
-     * @dev Uses Solidity's native abi.decode for compatibility
+     * @dev Supports version 1 (7 fields) and version 2 (8 fields)
      */
     function decode(bytes memory payload) 
         internal 
         pure 
         returns (StorachaCheckpointMessage memory) 
     {
-        (
-            uint8 version,
-            string memory cid,
-            bytes32 tag,
-            uint256 expiresAt,
-            address creator,
-            uint256 timestamp,
-            uint16 sourceChainId
-        ) = abi.decode(
-            payload,
-            (uint8, string, bytes32, uint256, address, uint256, uint16)
-        );
-        
-        return StorachaCheckpointMessage({
-            version: version,
-            cid: cid,
-            tag: tag,
-            expiresAt: expiresAt,
-            creator: creator,
-            timestamp: timestamp,
-            sourceChainId: sourceChainId
-        });
+        // Peek at version (first 32 bytes)
+        uint256 version;
+        assembly {
+            version := mload(add(payload, 32))
+        }
+
+        if (version == 2) {
+            (
+                uint8 v,
+                string memory cid,
+                bytes32 tag,
+                uint256 expiresAt,
+                address creator,
+                uint256 timestamp,
+                uint16 sourceChainId,
+                bool revoked
+            ) = abi.decode(
+                payload,
+                (uint8, string, bytes32, uint256, address, uint256, uint16, bool)
+            );
+            
+            return StorachaCheckpointMessage({
+                version: v,
+                cid: cid,
+                tag: tag,
+                expiresAt: expiresAt,
+                creator: creator,
+                timestamp: timestamp,
+                sourceChainId: sourceChainId,
+                revoked: revoked
+            });
+        } else {
+            // Default to version 1
+            (
+                uint8 v,
+                string memory cid,
+                bytes32 tag,
+                uint256 expiresAt,
+                address creator,
+                uint256 timestamp,
+                uint16 sourceChainId
+            ) = abi.decode(
+                payload,
+                (uint8, string, bytes32, uint256, address, uint256, uint16)
+            );
+            
+            return StorachaCheckpointMessage({
+                version: v,
+                cid: cid,
+                tag: tag,
+                expiresAt: expiresAt,
+                creator: creator,
+                timestamp: timestamp,
+                sourceChainId: sourceChainId,
+                revoked: false
+            });
+        }
     }
     
     // ============ VALIDATION ============
