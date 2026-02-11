@@ -11,7 +11,6 @@ import {
   getContractABI,
   ContractType,
   CHAIN_IDS,
-  isContractDeployed,
   type SupportedChainId,
 } from "../lib/contracts";
 
@@ -24,6 +23,7 @@ export interface CreateCheckpointParams {
 }
 
 export interface Checkpoint {
+  id: bigint;
   user: `0x${string}`;
   cid: string;
   tag: `0x${string}`;
@@ -38,9 +38,10 @@ export function useStorachaCheckpointer() {
   const [error, setError] = useState<string | null>(null);
 
   // Determine contract type based on chain
-  const contractType = chain?.id === CHAIN_IDS.BASE_SEPOLIA
-    ? ContractType.PUBLISHER
-    : ContractType.RECEIVER;
+  const contractType =
+    chain?.id === CHAIN_IDS.BASE_SEPOLIA
+      ? ContractType.PUBLISHER
+      : ContractType.RECEIVER;
 
   // Get contract address for current chain
   const contractAddress = chain?.id
@@ -68,6 +69,17 @@ export function useStorachaCheckpointer() {
       enabled: !!contractAddress && chain?.id !== undefined,
     },
   });
+
+  const { data: checkpointIds, refetch: refetchUserCheckpoints } =
+    useReadContract({
+      address: contractAddress as `0x${string}`,
+      abi: getContractABI(),
+      functionName: "getUserCheckpoints",
+      args: [address as `0x${string}`],
+      query: {
+        enabled: !!contractAddress && !!address,
+      },
+    });
 
   // Calculate checkpoint cost
   const calculateCost = useCallback(
@@ -184,6 +196,9 @@ export function useStorachaCheckpointer() {
     isContractAvailable: !!contractAddress,
     contractType,
     pricePerSecond,
+
+    checkpointIds: checkpointIds as bigint[] | undefined,
+    refetchUserCheckpoints,
 
     // Transaction state
     createCheckpoint,

@@ -39,6 +39,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
     uint256 public nextCheckpointId = 1;
     mapping(uint256 => Checkpoint) public checkpoints;
     mapping(bytes32 => uint256[]) public byCid;
+    mapping(address => uint256[]) public userCheckpoints;
 
     IAvailabilityVerifier public verifier;
     IWormhole public wormhole;
@@ -124,6 +125,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         });
 
         byCid[cidHash].push(id);
+        userCheckpoints[msg.sender].push(id);
 
         if (publishToWormhole) {
             bytes memory payload = abi.encode(
@@ -194,5 +196,9 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
             }
         }
         revert("not found");
+    }
+
+    function getUserCheckpoints(address user) external view returns (uint256[] memory) {
+        return userCheckpoints[user];
     }
 }
