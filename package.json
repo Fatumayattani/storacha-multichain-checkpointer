@@ -50,8 +50,9 @@
     ]
   },
   "dependencies": {
-    "@certusone/wormhole-sdk": "^0.10.18",
     "@openzeppelin/contracts": "^5.4.0",
+    "@wormhole-foundation/sdk": "^4.10.0",
+    "@wormhole-foundation/sdk-evm": "^4.10.0",
     "dotenv": "^17.2.3",
     "ethers": "^6.16.0"
   },

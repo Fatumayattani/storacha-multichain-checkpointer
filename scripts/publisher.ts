@@ -14,7 +14,7 @@ import { CHAIN_IDS } from "../constants/chainIds.ts";
 import {
   getEmitterAddressEth,
   parseSequenceFromLogEth,
-} from "@certusone/wormhole-sdk";
+} from "@wormhole-foundation/sdk-evm";
 
 dotenv.config();
 
