@@ -14,6 +14,7 @@
 import { network } from "hardhat";
 import { getChainConfig } from "../config/wormhole.config.js";
 import { CHAIN_IDS } from "../constants/chainIds.js";
+import { updateFrontendConfig } from "./utils/frontend-config.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -171,6 +172,10 @@ async function deployReceiver() {
   );
 
   console.log("💾 Deployment info saved to:", deploymentFile);
+
+  // Update frontend config
+  console.log("\n📝 Updating frontend configuration...");
+  await updateFrontendConfig("RECEIVER", chainId, receiverAddress);
 
   // Print next steps
   console.log("\n📋 Next Steps:");
