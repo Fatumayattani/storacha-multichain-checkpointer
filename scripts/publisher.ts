@@ -11,10 +11,32 @@ import {
   WORMHOLE_CONFIG,
 } from "../config/wormhole.config.ts";
 import { CHAIN_IDS } from "../constants/chainIds.ts";
-import {
-  getEmitterAddressEth,
-  parseSequenceFromLogEth,
-} from "@wormhole-foundation/sdk-evm";
+import { getAddress, zeroPadValue } from "ethers";
+
+import { Interface, Log } from "ethers";
+
+const WORMHOLE_CORE_ABI = [
+  "event LogMessagePublished(address indexed sender, uint64 sequence, uint32 nonce, bytes payload, uint8 consistencyLevel)",
+];
+
+const iface = new Interface(WORMHOLE_CORE_ABI);
+
+export function parseSequenceFromLogEth(log: Log): bigint {
+  const parsed = iface.parseLog({
+    topics: log.topics,
+    data: log.data,
+  });
+
+  if (!parsed) {
+    throw new Error("Log is not a Wormhole LogMessagePublished event");
+  }
+
+  return parsed.args.sequence as bigint;
+}
+
+export function getEmitterAddressEth(address: string): string {
+  return zeroPadValue(getAddress(address).toLowerCase(), 32);
+}
 
 dotenv.config();
 
