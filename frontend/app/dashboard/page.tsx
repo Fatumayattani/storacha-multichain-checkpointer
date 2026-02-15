@@ -3,6 +3,8 @@
 import { useAccount } from "wagmi";
 import { useRouter } from "next/navigation";
 import WalletConnector from "@/components/WalletConnector";
+import CheckpointList from "@/components/dashboard/CheckpointList";
+import { useStorachaCheckpointer } from "@/hooks/useStorachaCheckpointer";
 import {
   DocumentIcon,
   ClockIcon,
@@ -15,10 +17,22 @@ import { getChainName } from "@/lib/contracts";
 export default function DashboardPage() {
   const { address, isConnected, chain } = useAccount();
   const router = useRouter();
+  
+  const { 
+    checkpointIds, 
+    refetchUserCheckpoints, 
+    contractAddress 
+  } = useStorachaCheckpointer();
 
   const handleCreateCheckpoint = () => {
     router.push('/test');
   };
+
+  const handleRefresh = async () => {
+    await refetchUserCheckpoints();
+  };
+
+  const totalCheckpoints = checkpointIds?.length || 0;
 
   if (!isConnected) {
     return (
@@ -60,7 +74,7 @@ export default function DashboardPage() {
                 <p className="text-sm font-medium text-black">
                   Total Checkpoints
                 </p>
-                <p className="text-3xl font-bold mt-2 text-black">0</p>
+                <p className="text-3xl font-bold mt-2 text-black">{totalCheckpoints}</p>
               </div>
               <div className="p-3 bg-red-100 rounded-lg border-2 border-black">
                 <DocumentIcon className="w-8 h-8 text-red-600" />
@@ -72,9 +86,9 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-black">
-                  Active
+                  Wallet Address
                 </p>
-                <p className="text-3xl font-bold mt-2 text-black">0</p>
+                <p className="text-xl font-bold mt-2 text-black">{formatAddress(address || "")}</p>
               </div>
               <div className="p-3 bg-red-100 rounded-lg border-2 border-black">
                 <CheckCircleIcon className="w-8 h-8 text-red-600" />
@@ -86,9 +100,9 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-black">
-                  Expired
+                  Connected Chain
                 </p>
-                <p className="text-3xl font-bold mt-2 text-black">0</p>
+                <p className="text-xl font-bold mt-2 text-black">{chain ? getChainName(chain.id) : "Unknown"}</p>
               </div>
               <div className="p-3 bg-red-100 rounded-lg border-2 border-black">
                 <ClockIcon className="w-8 h-8 text-red-600" />
@@ -118,7 +132,10 @@ export default function DashboardPage() {
           <div className="p-6 border-b-2 border-black">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-black">Recent Checkpoints</h2>
-              <button className="px-4 py-2 bg-black text-white rounded hover:bg-red-600 border-2 border-black inline-flex items-center gap-2">
+              <button 
+                onClick={handleRefresh}
+                className="px-4 py-2 bg-black text-white rounded hover:bg-red-600 border-2 border-black inline-flex items-center gap-2"
+              >
                 <ArrowPathIcon className="w-4 h-4" />
                 Refresh
               </button>
@@ -126,22 +143,28 @@ export default function DashboardPage() {
           </div>
 
           <div className="p-6">
-            {/* Empty State */}
-            <div className="text-center py-12">
-              <DocumentIcon className="w-16 h-16 mx-auto text-red-600 mb-4" />
-              <h3 className="text-lg font-semibold text-black mb-2">
-                No checkpoints yet
-              </h3>
-              <p className="text-black mb-6">
-                Get started by creating your first checkpoint
-              </p>
-              <button
-                onClick={handleCreateCheckpoint}
-                className="px-6 py-3 bg-red-600 text-white rounded hover:bg-red-700 border-2 border-black font-semibold"
-              >
-                Create Checkpoint
-              </button>
-            </div>
+            {checkpointIds && contractAddress ? (
+              <CheckpointList 
+                contractAddress={contractAddress as `0x${string}`} 
+                checkpointIds={checkpointIds} 
+              />
+            ) : (
+              <div className="text-center py-12">
+                <DocumentIcon className="w-16 h-16 mx-auto text-red-600 mb-4" />
+                <h3 className="text-lg font-semibold text-black mb-2">
+                  No checkpoints yet
+                </h3>
+                <p className="text-black mb-6">
+                  Get started by creating your first checkpoint
+                </p>
+                <button
+                  onClick={handleCreateCheckpoint}
+                  className="px-6 py-3 bg-red-600 text-white rounded hover:bg-red-700 border-2 border-black font-semibold"
+                >
+                  Create Checkpoint
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
