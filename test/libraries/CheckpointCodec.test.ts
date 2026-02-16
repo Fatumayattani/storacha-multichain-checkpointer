@@ -20,7 +20,7 @@ describe("CheckpointCodec Library", function () {
 
   describe("Constants", function () {
     it("should have correct version", async function () {
-      expect(await testContract.VERSION()).to.equal(1);
+      expect(await testContract.VERSION()).to.equal(2);
     });
 
     it("should have correct CID length limits", async function () {
@@ -37,13 +37,14 @@ describe("CheckpointCodec Library", function () {
     it("should encode and decode round-trip correctly", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600, // 1 hour from now
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       const encoded = await testContract.encodeMessage(message);
@@ -56,6 +57,7 @@ describe("CheckpointCodec Library", function () {
       expect(decoded.creator).to.equal(message.creator);
       expect(decoded.timestamp).to.equal(message.timestamp);
       expect(decoded.sourceChainId).to.equal(message.sourceChainId);
+      expect(decoded.revoked).to.equal(message.revoked);
     });
 
     it("should handle different CID lengths", async function () {
@@ -65,13 +67,14 @@ describe("CheckpointCodec Library", function () {
         "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG" + "x".repeat(50);
 
       const message1 = {
-        version: 1,
+        version: 2,
         cid: shortCid,
         tag: ethers.keccak256(ethers.toUtf8Bytes("test1")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        revoked: false,
       };
 
       const message2 = {
@@ -111,13 +114,14 @@ describe("CheckpointCodec Library", function () {
     it("should validate correct message", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.true;
@@ -126,13 +130,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject invalid version", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 2, // Invalid version
+        version: 3, // Invalid version
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -141,13 +146,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject empty CID", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "", // Empty CID
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -156,13 +162,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject CID too short", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "short", // Too short
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -171,13 +178,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject CID too long", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "x".repeat(101), // Too long
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -186,13 +194,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject future timestamp", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime + 3600, // Future timestamp
         sourceChainId: CHAIN_IDS.AVALANCHE_FUJI_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -201,13 +210,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject past expiration", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime - 3600, // Past expiration
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.ETHEREUM_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -216,13 +226,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject zero address creator", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x0000000000000000000000000000000000000000", // Zero address
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -231,13 +242,14 @@ describe("CheckpointCodec Library", function () {
     it("should reject zero source chain ID", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: 0, // Zero chain ID
+        revoked: false,
       };
 
       expect(await testContract.validateMessage(message)).to.be.false;
@@ -248,13 +260,14 @@ describe("CheckpointCodec Library", function () {
     it("should generate consistent checkpoint IDs", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       const checkpointId1 = await testContract.getCheckpointId(message);
@@ -266,13 +279,14 @@ describe("CheckpointCodec Library", function () {
     it("should generate unique IDs for different messages", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message1 = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag-1")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       const message2 = {
@@ -291,13 +305,14 @@ describe("CheckpointCodec Library", function () {
     it("should generate consistent message hashes", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       const hash1 = await testContract.getMessageHash(message);
@@ -309,13 +324,14 @@ describe("CheckpointCodec Library", function () {
     it("should generate different hashes for different messages", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message1 = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag-1")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       const message2 = {
@@ -334,13 +350,14 @@ describe("CheckpointCodec Library", function () {
     it("should correctly identify expired messages", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime - 3600, // Expired
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime - 7200,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.isExpired(message)).to.be.true;
@@ -349,13 +366,14 @@ describe("CheckpointCodec Library", function () {
     it("should correctly identify non-expired messages", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600, // Not expired
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.isExpired(message)).to.be.false;
@@ -364,13 +382,14 @@ describe("CheckpointCodec Library", function () {
     it("should correctly identify too old messages", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime - 8 * 24 * 60 * 60, // 8 days ago (too old)
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.isTooOld(message)).to.be.true;
@@ -379,13 +398,14 @@ describe("CheckpointCodec Library", function () {
     it("should correctly identify not too old messages", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime - 6 * 24 * 60 * 60, // 6 days ago (not too old)
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.isTooOld(message)).to.be.false;
@@ -395,13 +415,14 @@ describe("CheckpointCodec Library", function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const maxAge = 7 * 24 * 60 * 60; // 7 days
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime - maxAge + 1, // Just under the boundary
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       expect(await testContract.isTooOld(message)).to.be.false;
@@ -412,13 +433,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw InvalidVersion error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 2, // Invalid version
+        version: 3, // Invalid version
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       await expect(
@@ -429,13 +451,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw InvalidCID error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "", // Empty CID
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       await expect(
@@ -446,13 +469,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw InvalidTimestamp error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime + 3600, // Future timestamp
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       await expect(
@@ -463,13 +487,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw InvalidExpiration error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime - 3600, // Past expiration
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       await expect(
@@ -480,13 +505,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw InvalidCreator error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x0000000000000000000000000000000000000000", // Zero address
         timestamp: currentTime,
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       await expect(
@@ -497,13 +523,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw InvalidSourceChain error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime,
         sourceChainId: 0, // Zero chain ID
+        revoked: false,
       };
 
       await expect(
@@ -514,13 +541,14 @@ describe("CheckpointCodec Library", function () {
     it("should throw MessageTooOld error", async function () {
       const currentTime = Math.floor(Date.now() / 1000);
       const message = {
-        version: 1,
+        version: 2,
         cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
         tag: ethers.keccak256(ethers.toUtf8Bytes("test-tag")),
         expiresAt: currentTime + 3600,
         creator: "0x1234567890123456789012345678901234567890",
         timestamp: currentTime - 8 * 24 * 60 * 60, // 8 days ago (too old)
         sourceChainId: CHAIN_IDS.BASE_SEPOLIA_WORMHOLE,
+        revoked: false,
       };
 
       await expect(
