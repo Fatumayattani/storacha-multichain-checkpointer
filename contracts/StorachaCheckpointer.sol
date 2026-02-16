@@ -3,16 +3,7 @@ pragma solidity ^0.8.20;
 
 import "./IAvailabilityVerifier.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-
-contract ReentrancyGuard {
-    uint256 private locked = 1;
-    modifier nonReentrant() {
-        require(locked == 1, "reentrancy");
-        locked = 2;
-        _;
-        locked = 1;
-    }
-}
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IWormhole {
     function publishMessage(
