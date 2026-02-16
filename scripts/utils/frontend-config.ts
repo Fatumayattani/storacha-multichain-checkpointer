@@ -25,7 +25,7 @@ export async function updateFrontendConfig(
   }
 
   const frontendPath = path.join(process.cwd(), "frontend");
-  const envFilePath = path.join(frontendPath, ".env.local");
+  const envFilePath = path.join(frontendPath, ".env.example");
 
   let content = "";
   if (fs.existsSync(envFilePath)) {
