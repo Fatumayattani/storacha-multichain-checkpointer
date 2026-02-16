@@ -3,16 +3,7 @@ pragma solidity ^0.8.20;
 
 import "./IAvailabilityVerifier.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-
-contract ReentrancyGuard {
-    uint256 private locked = 1;
-    modifier nonReentrant() {
-        require(locked == 1, "reentrancy");
-        locked = 2;
-        _;
-        locked = 1;
-    }
-}
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IWormhole {
     function publishMessage(
@@ -39,6 +30,7 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
     uint256 public nextCheckpointId = 1;
     mapping(uint256 => Checkpoint) public checkpoints;
     mapping(bytes32 => uint256[]) public byCid;
+    mapping(address => mapping(bytes32 => uint256)) public checkpointIdsByCreatorTag;
 
     IAvailabilityVerifier public verifier;
     IWormhole public wormhole;
@@ -123,6 +115,8 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
             verified: ok
         });
 
+        checkpointIdsByCreatorTag[msg.sender][tag] = id;
+
         byCid[cidHash].push(id);
 
         if (publishToWormhole) {
@@ -188,11 +182,8 @@ contract StorachaCheckpointer is AccessControl, ReentrancyGuard {
         view
         returns (Checkpoint memory, uint256 id)
     {
-        for (uint256 i = 1; i < nextCheckpointId; i++) {
-            if (checkpoints[i].user == creator && checkpoints[i].tag == tag) {
-                return (checkpoints[i], i);
-            }
-        }
-        revert("not found");
+        id = checkpointIdsByCreatorTag[creator][tag];
+        require(id != 0, "not found");
+        return (checkpoints[id], id);
     }
 }

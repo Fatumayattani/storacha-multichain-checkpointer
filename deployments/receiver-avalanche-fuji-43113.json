@@ -2,10 +2,10 @@
   "network": "Avalanche Fuji",
   "chainId": 43113,
   "wormholeChainId": 6,
-  "receiverAddress": "0x75d2b02f5980D4D1BB6cf7d3829A7a1F3BB1Ef76",
+  "receiverAddress": "0xC22bA0AEf35596d10E6eC470B87dbae357a139A1",
   "wormholeCoreAddress": "0x7bbcE28e64B3F8b84d876Ab298393c38ad7aac4C",
-  "ownerAddress": "0x67C5967429280Ae900C3D16DEAEFB68e21A49FE7",
-  "deployedAt": "2025-11-22T20:02:58.516Z",
-  "transactionHash": "0x56c7b9d99bc0400c7f77b652359c1d7e45b4fe96e37862d78765c1be27dcc630",
-  "blockNumber": 47967770
+  "ownerAddress": "0xAE85496e82a163a25F6531Bd1a7304C8354a76BE",
+  "deployedAt": "2026-02-13T09:28:03.445Z",
+  "transactionHash": "0x52cf6382887022601363ed2bf57d16b2916e596b2a90fc0162a545dc4c2c69cf",
+  "blockNumber": 51764522
 }
