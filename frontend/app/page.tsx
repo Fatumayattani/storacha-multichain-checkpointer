@@ -26,7 +26,7 @@ export default function HomePage() {
             <ul className="space-y-2 text-foreground-muted">
               <li className="flex items-center">
                 <span className="text-accent mr-2">✓</span>
-                Upload files to Storacha (web3.storage)
+                Upload files to Storacha
               </li>
               <li className="flex items-center">
                 <span className="text-accent mr-2">✓</span>
@@ -87,7 +87,7 @@ export default function HomePage() {
             The Storacha Multichain Checkpointer is a decentralized application that enables users to:
           </p>
           <ul className="list-disc list-inside space-y-2 text-foreground-muted">
-            <li>Store files permanently on IPFS via Storacha (web3.storage)</li>
+            <li>Store files permanently on IPFS via Storacha</li>
             <li>Create tamper-proof checkpoints on multiple blockchains</li>
             <li>Verify file availability across the IPFS network</li>
             <li>Enable cross-chain communication through Wormhole protocol</li>
