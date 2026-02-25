@@ -30,19 +30,18 @@ The architecture supports additional Wormhole connected chains as targets.
 sequenceDiagram
     participant User
     participant Storacha
-    participant SourceChain as Source Chain Publisher
+    participant Publisher as Publisher (Base Sepolia)
     participant Wormhole
-    participant DestinationChain as Destination Chain Receiver
-    participant Registry
+    participant Receiver as Receiver (Avalanche Fuji)
 
     User->>Storacha: Upload file
     Storacha-->>User: Return CID
 
-    User->>SourceChain: Submit checkpoint with CID
-    SourceChain->>Wormhole: Emit cross chain message
-    Wormhole->>DestinationChain: Deliver verified message
-    DestinationChain->>Registry: Store record
-    Registry-->>User: CID recorded on destination chain
+    User->>Publisher: Submit checkpoint with CID
+    Publisher->>Wormhole: Emit cross chain message
+    Wormhole->>Receiver: Deliver verified message
+    Receiver->>Receiver: Validate and store checkpoint
+    Receiver-->>User: CID recorded on destination chain
 ```
 
 ---
@@ -81,7 +80,6 @@ Storacha CID
 → Source chain publisher
 → Wormhole
 → Destination chain receiver
-→ On chain registry
 
 ---
 
@@ -131,7 +129,7 @@ All project documentation is located in the `docs/` directory.
 | Deployment   | [docs/deployment.md](./docs/deployment.md)     | set up and Testnet deployment guide |
 | Roadmap      | [docs/roadmap.md](./docs/roadmap.md)           | Project phases and milestones       |
 | Product      | [docs/product.md](./docs/product.md)           | Product vision and positioning      |
-| Extras       | [docs/extras.md](./docs/extras.md)             | Diagrams, demos, benchmarks         |
+| Extras       | [docs/extras.md](./docs/extras.md)             | pitch deck, demos, benchmarks       |
 
 ---
 

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This document describes how to deploy and test Storacha Multichain Checkpointer on testnets.
+This document describes how to set up, deploy and test Storacha Multichain Checkpointer on testnets.
 
 Current live flow:
 
@@ -151,7 +151,7 @@ Use the built-in UI testing controls:
 
 This validates:
 
-Upload → Verify → Checkpoint → Cross-chain propagation → Registry confirmation
+Upload → Verify → Checkpoint → Cross-chain propagation → Receiver confirmation
 
 ---
 
