@@ -1,192 +1,140 @@
-# 🌐 Storacha Multichain Checkpointer
+# Storacha Multichain Checkpointer
 
-**Storacha Multichain Checkpointer** is an **on-chain protocol** built on a smart contract system that allows anyone to **publish and synchronize Storacha CIDs across multiple chains** using **Wormhole** as the cross-chain transport layer.
+Storacha Multichain Checkpointer lets you store a file on Storacha and record its proof across multiple blockchains using Wormhole.
 
-The protocol makes it simple to anchor content stored on Storacha, propagate that state to other networks, and verify it transparently on-chain — without centralized infrastructure.
+It creates a verifiable on chain record of a Storacha CID on a source chain and propagates it to one or more destination chains.
 
----
+## Current Deployment
 
-## ✨ Key Features
+Live cross chain flow:
 
-- ✅ **On-chain CID anchoring** — securely store CID, tags, and expiry on the source chain
-- 🌉 **Cross-chain propagation** — broadcast checkpoint messages to multiple target chains through Wormhole
-- 🪶 **Lightweight architecture** — no backend needed in MVP (client-side uploads only)
-- 🔍 **Optional CID verification** — UI checks against IPFS gateways before submission
-- 🧭 **Upgradeable flow** — can integrate oracles or off-chain verifiers in later versions
+Base Sepolia → Avalanche Fuji
+
+The architecture supports additional Wormhole connected chains as targets.
 
 ---
 
-## 🧭 Architecture Overview
+## What It Does
 
-```
-+-------------------------+
-|      User / Client      |
-|  (Storacha Upload + UI) |
-+-----------+-------------+
-            |
-            |  CID
-            v
-+-----------------------------+
-| Storacha Checkpointer (EVM) |
-| - createCheckpoint          |
-| - emits CheckpointCreated   |
-+-----------+-----------------+
-            |
-            | Wormhole Message
-            v
-+------------------------------+
-| Receiver Contract (Target)   |
-| - decode + store CID         |
-| - verify VAA via Wormhole    |
-+------------------------------+
-```
+- Upload a file to Storacha
+- Generate a CID
+- Create a checkpoint on a source chain
+- Send the checkpoint through Wormhole
+- Confirm and store it on a destination chain
 
 ---
 
-## 🧱 Smart Contract / Protocol Components
+## Sequence Diagram
 
-### 1. Checkpointer (Sender)
+```mermaid
+sequenceDiagram
+    participant User
+    participant Storacha
+    participant SourceChain as Source Chain Publisher
+    participant Wormhole
+    participant DestinationChain as Destination Chain Receiver
+    participant Registry
 
-- Anchors CID and metadata on the source chain
-- Serializes and publishes Wormhole message
+    User->>Storacha: Upload file
+    Storacha-->>User: Return CID
 
-```solidity
-function createCheckpoint(
-    string calldata cid,
-    bytes32 tag,
-    uint256 duration,
-    bool publishToWormhole,
-    uint16[] calldata targetChains
-) external payable;
-```
-
-### 2. Receiver
-
-- Receives Wormhole VAA
-- Decodes and persists the checkpoint
-- Emits `CheckpointReceived`
-
-### 3. Frontend
-
-- Handles client-side upload with [w3up](https://w3up.dev)
-- Verifies CID availability using IPFS gateways
-- Submits transaction to Checkpointer contract
-
----
-
-## 📜 Message Structure
-
-```solidity
-struct StorachaCheckpointMessage {
-    uint8 version;
-    string cid;
-    bytes32 tag;
-    uint256 expiresAt;
-    address creator;
-    uint256 timestamp;
-    uint16 sourceChainId;
-}
-```
-
-This message is broadcasted through Wormhole from the source chain to target chains and verified by receiver contracts.
-
----
-
-## 🧪 Current MVP Scope
-
-- ✅ Client-side Storacha uploads (no backend)
-- ✅ Trust-on-first-write verification
-- ✅ Wormhole message publishing and receiving
-- ✅ Base Sepolia → Avalanche Fuji testnet flow
-- 🧪 Optional client CID availability checks
-- 🪶 Lightweight gas footprint
-
----
-
-## 🚀 Roadmap
-
-| Phase | Workstream        | Description                                  | Status         |
-| ----- | ----------------- | -------------------------------------------- | -------------- |
-| 1     | Sender Contract   | Implement `createCheckpoint` + serialization | 🟡 In Progress |
-| 2     | Receiver Contract | Wormhole VAA validation and storage          | 🟡 In Progress |
-| 3     | Frontend          | Upload + CID check + transaction submit      | 🟡 In Progress |
-| 4     | Integration       | End-to-end Base Sepolia → Fuji test          | ⏳ Upcoming    |
-| 5     | V2 Expansion      | Add off-chain verifier + sponsor relayer     | ⏳ Planned     |
-
----
-
-## 🧑‍💻 Team & Roles
-
-- **Fatuma** — Sender contract, serialization logic, Wormhole message publisher
-- **Patrick** — Frontend: upload flow, CID verification UI, transaction submission
-- **Hany** — Wormhole environment setup, receiver contract, cross-chain testing
-
----
-
-## 🧪 Testnet Environment
-
-- **Source Chain:** Base Sepolia
-- **Target Chain:** Avalanche Fuji
-- **Additional:** Ethereum Sepolia (next phase)
-- **Cross-chain Transport:** Wormhole Guardian Network (testnet)
-
----
-
-## 🛠️ Local Development
-
-**Prerequisites**
-
-- Node.js ≥ 18
-- pnpm or npm
-- Hardhat
-- Foundry (optional)
-- Wormhole CLI
-- `.env` file with your keys
-
-```bash
-# Install dependencies
-pnpm install
-
-# Compile contracts
-npx hardhat compile
-
-# Run tests
-npx hardhat test
-
-# Deploy to testnet
-npx hardhat run scripts/deploy.ts --network baseSepolia
+    User->>SourceChain: Submit checkpoint with CID
+    SourceChain->>Wormhole: Emit cross chain message
+    Wormhole->>DestinationChain: Deliver verified message
+    DestinationChain->>Registry: Store record
+    Registry-->>User: CID recorded on destination chain
 ```
 
 ---
 
-## 🌍 Example Flow
+## Use Cases
 
-1. User uploads file to Storacha and gets CID
-2. UI verifies CID availability
-3. User calls `createCheckpoint`
-4. Wormhole message published to target chains
-5. Receiver contract decodes message and stores checkpoint
-6. Anyone can retrieve and verify CID cross-chain
+### Cross Chain Proof of Storage
+
+Anchor a Storacha CID on one chain and confirm it on another, creating a verifiable record across networks.
+
+### Data Provenance Tracking
+
+Record who created a piece of data and when, and propagate that record across chains.
+
+### AI Dataset Attestation
+
+Publish and verify dataset references used in AI workflows.
+
+### Cross Chain Content Verification
+
+Allow applications on different chains to verify the same CID independently.
+
+### Redundant Record Anchoring
+
+Reduce reliance on a single blockchain by recording proofs on multiple chains.
+
+### Agent Driven Data Publishing
+
+Enable automated agents to create and propagate verifiable data records using SDK tooling.
 
 ---
 
-## 🧠 Future Enhancements
+## Architecture
 
-- 🪙 Oracle-based CID verification (e.g. Chainlink Functions)
-- 🧭 Relay/sponsor model for Wormhole costs
-- 🛡 Attestation and expiry enforcement
-- 🧰 Dev-friendly SDK for integration into other apps
-- 🌐 Multi-chain dashboard for monitoring checkpoints
-
----
-
-## 🤝 Contributing
-
-We welcome contributors!
-Open an issue or PR to suggest improvements.
+Storacha CID
+→ Source chain publisher
+→ Wormhole
+→ Destination chain receiver
+→ On chain registry
 
 ---
 
-## 📜 License
+## Project Status
 
-MIT © 2025
+### Completed
+
+- [x] Upload files to Storacha
+- [x] Verify CID availability across IPFS gateways
+- [x] Create blockchain checkpoints with metadata
+- [x] Cross chain messaging via Wormhole
+- [x] Multi wallet support with MetaMask and WalletConnect
+- [x] Publisher contract live on Base Sepolia
+- [x] Receiver contract live on Avalanche Fuji
+- [x] End to end Base Sepolia → Avalanche Fuji flow validated
+- [x] Replay protection enabled on receiver
+
+---
+
+### In Progress
+
+- [ ] Structured data attestation format
+- [ ] On chain provenance registry
+- [ ] TypeScript SDK for attestation creation
+- [ ] ElizaOS adapter integration
+- [ ] Expanded documentation in docs/
+
+---
+
+### Ahead
+
+- [ ] Support additional Wormhole connected chains
+- [ ] Improved indexing and querying
+- [ ] Propagation time benchmarking
+- [ ] Developer integration examples
+
+---
+
+## Documentation
+
+All project documentation is located in the `docs/` directory.
+
+| Document     | Path                                           | Description                         |
+| ------------ | ---------------------------------------------- | ----------------------------------- |
+| Architecture | [docs/architecture.md](./docs/architecture.md) | Cross chain system overview         |
+| Contracts    | [docs/contracts.md](./docs/contracts.md)       | Contract roles and responsibilities |
+| Deployment   | [docs/deployment.md](./docs/deployment.md)     | set up and Testnet deployment guide |
+| Roadmap      | [docs/roadmap.md](./docs/roadmap.md)           | Project phases and milestones       |
+| Product      | [docs/product.md](./docs/product.md)           | Product vision and positioning      |
+| Extras       | [docs/extras.md](./docs/extras.md)             | Diagrams, demos, benchmarks         |
+
+---
+
+## License
+
+MIT
