@@ -28,7 +28,10 @@ describe("DataAttestationRegistry", function () {
     const DataAttestationRegistry = await ethers.getContractFactory(
       "DataAttestationRegistry"
     );
-    registry = await DataAttestationRegistry.deploy(receiver.address);
+    registry = await DataAttestationRegistry.deploy(
+      receiver.address,
+      receiver.address
+    );
   });
 
   describe("Access control", function () {

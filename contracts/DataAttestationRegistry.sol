@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 /**
  * @title DataAttestationRegistry
  * @notice Stores and indexes verified data attestations on-chain (e.g. from Wormhole).
@@ -8,7 +10,7 @@ pragma solidity ^0.8.19;
  *      recorded twice. Multiple attestations for the same CID are allowed.
  *      Only the designated receiver (e.g. WormholeReceiver) may call recordAttestation.
  */
-contract DataAttestationRegistry {
+contract DataAttestationRegistry is Ownable {
     // ============ STRUCTS ============
 
     /// @notice Stored attestation record (CID, creator, timestamp, lineage, license, recordedAt)
@@ -67,8 +69,23 @@ contract DataAttestationRegistry {
 
     // ============ CONSTRUCTOR ============
 
-    /// @param _receiver Address allowed to call recordAttestation (e.g. WormholeReceiver)
-    constructor(address _receiver) {
+    /**
+     * @notice Initialize the registry
+     * @param _receiver Address allowed to call recordAttestation
+     * @param _initialOwner Address of the contract owner
+     */
+    constructor(address _receiver, address _initialOwner) Ownable(_initialOwner) {
+        if (_receiver == address(0)) revert ZeroReceiver();
+        receiver = _receiver;
+    }
+
+    // ============ ADMIN FUNCTIONS ============
+
+    /**
+     * @notice Update the designated receiver address
+     * @param _receiver New receiver address
+     */
+    function setReceiver(address _receiver) external onlyOwner {
         if (_receiver == address(0)) revert ZeroReceiver();
         receiver = _receiver;
     }
